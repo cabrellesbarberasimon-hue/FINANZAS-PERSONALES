@@ -409,6 +409,10 @@ model Import {
   fileType             String // csv | xlsx | xls | pdf (futuro)
   /// sha256 del fichero: avisa si se sube el mismo fichero dos veces.
   fileHash             String
+  fileSize             Int          @default(0)
+  /// Fichero original tal cual se subió (trazabilidad: permite volver a
+  /// analizarlo y demostrar de dónde sale cada movimiento). Se puede purgar.
+  fileData             Bytes?
   status               ImportStatus @default(PREVIEW)
   /// JSON con el mapeo de columnas usado (auditoría).
   mapping              String

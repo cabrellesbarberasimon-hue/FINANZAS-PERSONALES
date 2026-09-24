@@ -269,10 +269,15 @@ los pasos 1-6 (§35); el progreso se guarda en `AppSetting`.
 
 Detalles:
 
-1. **Lectura**: CSV con detección de codificación (UTF-8, si falla Windows-1252 —
-   habitual en bancos españoles) y de delimitador (`;` `,` tab). XLSX/XLS con
-   SheetJS. Una interfaz `StatementParser { canParse(file); parse(file): RawTable }`
-   permite añadir PDF u otros formatos sin tocar el resto.
+1. **Lectura** (`src/server/import/parsers`): el tipo se decide por el
+   CONTENIDO, no por la extensión. CSV con detección de codificación (UTF-8; si
+   no es válido, Windows-1252 — habitual en bancos españoles) y de delimitador
+   (`;` `,` tab `|`) con PapaParse. XLSX con `read-excel-file`. XLS binario
+   antiguo: rechazado con instrucciones (ver riesgos). Una interfaz
+   `StatementParser { canParse(bytes); parse(bytes): RawTable }` permite añadir
+   PDF u otros formatos sin tocar el resto. El fichero original se guarda en
+   `Import.fileData` para poder reanalizarlo y rastrear cada movimiento hasta
+   su fila (`importRowIndex`).
 2. **Cabecera**: muchos bancos ponen títulos/IBAN antes de la tabla. Se elige la
    primera fila con ≥ 3 celdas de texto que contenga palabras clave (fecha,
    concepto, importe, saldo…). El usuario puede corregirla.
@@ -292,8 +297,16 @@ Detalles:
    como `AccountBalance` (source `IMPORT`) y se compara con el saldo calculado.
    Si hay columna de saldo en cada fila, se puede localizar **la primera fila
    donde diverge** el saldo acumulado → origen de la diferencia.
-7. **Confirmación atómica**: todo en una transacción de BD. Si algo falla, no se
-   guarda nada.
+7. **Coherencia interna del extracto**: si hay columna de saldo, se comprueba
+   `saldo[i] = saldo[i-1] + importe[i]`. Detecta separador decimal o columnas mal
+   asignadas, y si solo cuadra invirtiendo signos, lo sugiere (tarjetas).
+8. **Saldo inicial desde el extracto**: si la cuenta se creó con el saldo de hoy
+   y el extracto es anterior, se ofrece (nunca se aplica solo) ajustar el saldo
+   inicial al deducido del extracto. Deshacer la importación lo restaura.
+9. **Confirmación atómica**: todo en una transacción de BD, recalculando la
+   vista previa dentro de ella. Si algo falla, no se guarda nada.
+10. **Deshacer**: borra solo los movimientos de esa importación, sus saldos y
+   avisos; desvincula transferencias con movimientos de otras importaciones.
 
 ---
 
@@ -498,7 +511,7 @@ correcciones como `dismissed` para no insistir.
 | Formatos bancarios heterogéneos (títulos antes de la cabecera, `Cargo`/`Abono` separados, signo al final, fechas DD/MM vs MM/DD, codificación Windows-1252) | Importes o fechas mal leídos | Detección por fichero + confirmación en vista previa; perfiles por banco; parser de importes estricto con tests; fixtures reales anonimizados. |
 | El banco cambia el texto de una operación entre descargas | Duplicado no detectado por hash | Nivel 2 (duplicado probable) + conciliación de saldo que revela el descuadre. |
 | Operaciones pendientes que luego cambian de importe/fecha al liquidarse (tarjetas) | Duplicado o importe erróneo | Recomendación: importar solo operaciones liquidadas; nivel 2 las detecta. |
-| Extractos XLS antiguos (formato BIFF) | No legibles | SheetJS los lee. Nota: la versión de SheetJS en npm (0.18.5) tiene avisos de seguridad y la versión corregida se distribuye desde su CDN, que este entorno de desarrollo bloquea. Se decidirá en la fase 3 (alternativa: `exceljs` para XLSX + SheetJS aislado solo para XLS, procesando únicamente ficheros propios). |
+| Extractos XLS antiguos (formato BIFF) | No legibles | **Decisión (fase 3): no se admiten.** La única librería que los lee (SheetJS de npm) tiene avisos de seguridad. Se detectan por contenido y se pide guardarlos como XLSX/CSV. Los «.xls» que en realidad son CSV se leen; los que son HTML se rechazan con instrucciones. |
 | Coma flotante en importes | Descuadres de céntimos | Céntimos enteros en todo el sistema; `Decimal` para participaciones. |
 | Zonas horarias | Operación en el mes equivocado | Fechas a 00:00 UTC; nunca `new Date()` local para fechas contables. |
 | Transferencias mal emparejadas | Ingresos/gastos inflados o perdidos | Emparejamiento automático solo con candidata única; el resto a revisión. |
@@ -527,7 +540,7 @@ correcciones como `dismissed` para no insistir.
 |---|---|---|
 | **1** ✅ | Arquitectura, esquema, migración inicial, seed de categorías/reglas, dominio base (dinero, fechas, texto, hash anti-duplicados, ahorro), layout y navegación, modo demo aislado, README | Tests de dominio y de integridad de BD en verde; build OK |
 | **2** ✅ | Cuentas (CRUD, saldo inicial, saldos declarados, pasivos), movimientos (tabla, filtros, edición con AuditLog, alta manual, vincular transferencias), asistente inicial, datos demo | Saldo calculado correcto; editar deja traza |
-| **3** | Importación CSV/XLSX/XLS: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
+| **3** ✅ | Importación CSV/XLSX: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
 | **4** | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
 | **5** | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |
 | **6** | Inversiones: aportaciones, VL, posición, rentabilidad simple, TIR, dashboard de inversiones | Tests de aportaciones vs. rentabilidad |

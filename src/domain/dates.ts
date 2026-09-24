@@ -44,8 +44,8 @@ export function parseDate(
   if (input === null || input === undefined) return null;
   if (input instanceof Date) {
     if (Number.isNaN(input.getTime())) return null;
-    // Las librerías de Excel devuelven fechas en hora local: nos quedamos con el día.
-    return utcDate(input.getFullYear(), input.getMonth() + 1, input.getDate());
+    // read-excel-file devuelve las fechas de Excel a las 00:00 UTC: se usa el día UTC.
+    return utcDate(input.getUTCFullYear(), input.getUTCMonth() + 1, input.getUTCDate());
   }
   if (typeof input === "number") return excelSerialToDate(input);
 

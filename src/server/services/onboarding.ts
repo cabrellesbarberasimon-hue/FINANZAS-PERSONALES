@@ -85,7 +85,6 @@ export async function getOnboarding(db: Db, userId: string) {
       description: "Sube el CSV o Excel de tu banco.",
       href: "/importar",
       status: status("import", imports > 0),
-      availableInPhase: 3,
     },
     {
       key: "categories",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { daysBetween, toISODate } from "./dates";
-import { descriptionSimilarity, normalizeForHash } from "./text";
+import { cleanDescription, descriptionSimilarity, normalizeForHash } from "./text";
 
 /**
  * Sistema anti-duplicados (docs/ARQUITECTURA.md §6).
@@ -88,7 +88,12 @@ export function isProbableDuplicate(
   if (row.amount !== existing.amount) return false;
   const days = Math.abs(daysBetween(row.date, existing.date));
   if (days > PROBABLE_DUPLICATE_MAX_DAYS) return false;
-  const sim = descriptionSimilarity(row.description, existing.descriptionRaw);
+  // Se compara también sin el ruido bancario ("COMPRA TARJ. 1234XXXX..."): el
+  // mismo gasto puede venir con y sin ese prefijo según el origen.
+  const sim = Math.max(
+    descriptionSimilarity(row.description, existing.descriptionRaw),
+    descriptionSimilarity(cleanDescription(row.description), cleanDescription(existing.descriptionRaw)),
+  );
   // Mismo día y mismo importe con descripción algo distinta también es sospechoso.
   return sim >= PROBABLE_DUPLICATE_MIN_SIMILARITY || (days === 0 && sim > 0);
 }

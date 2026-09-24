@@ -8,9 +8,10 @@ patrimonio, presupuestos y objetivos.
 corregir → automatización → simplicidad. Nunca se inventan datos: si falta
 información se muestra **"Pendiente de datos"**.
 
-> Estado: **Fases 1 y 2 completadas**: arquitectura, base de datos, cuentas
+> Estado: **Fases 1, 2 y 3 completadas**: arquitectura, base de datos, cuentas
 > (saldos, conciliación, deudas), movimientos (filtros, alta manual, edición
-> con historial, transferencias internas) y asistente inicial. El diseño completo y el plan por fases están en
+> con historial, transferencias internas), asistente inicial e importación de
+> extractos CSV/XLSX con anti-duplicados y conciliación. El diseño completo y el plan por fases están en
 > [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
 ---
@@ -130,20 +131,36 @@ restaurar y guarda automáticamente el estado actual).
 
 ## Importación de extractos
 
-*(Implementación en la fase 3; diseño en [`docs/ARQUITECTURA.md` §5](docs/ARQUITECTURA.md#5-flujo-de-importación-de-extractos).)*
+Diseño completo en [`docs/ARQUITECTURA.md` §5](docs/ARQUITECTURA.md#5-flujo-de-importación-de-extractos).
 
-Flujo: subir CSV/XLSX/XLS → detectar cabecera → vista previa → asignar columnas →
-revisar ("184 detectadas · 178 nuevas · 6 ya existían") → confirmar. Reimportar el
-mismo extracto nunca duplica movimientos (hash por cuenta + fecha + importe +
-concepto + ocurrencia, con restricción única en la BD).
+1. **Importar** → elige la cuenta y sube el fichero (CSV o XLSX, máx. 5 MB).
+   Los `.xls` antiguos no se admiten: ábrelos con Excel/LibreOffice y guárdalos
+   como `.xlsx`.
+2. **Columnas**: la app detecta la fila de cabecera (aunque haya títulos antes),
+   la codificación, el separador, el formato de fecha y el decimal, y propone qué
+   es cada columna. Revísalo con la muestra.
+3. **Revisión**: «Se han detectado N operaciones · X nuevas · Y ya existían ·
+   Z posibles duplicados · W no válidas», con la categoría propuesta por las
+   reglas, la comprobación del saldo del propio extracto y la conciliación
+   prevista. Desmarca lo que no quieras.
+4. **Confirmar**: se guarda todo de una vez. El saldo final del extracto queda
+   registrado y, si no cuadra, aparece un aviso en Revisión.
+5. **Deshacer**: desde el detalle de la importación.
+
+Reimportar el mismo extracto, o uno que se solapa, nunca duplica movimientos.
+Los posibles duplicados (mismo importe, fecha cercana, texto parecido) se
+importan marcados para revisión, nunca en silencio.
 
 ### Añadir un nuevo formato bancario
 
 1. Lo normal es **no programar nada**: al importar, asigna las columnas una vez y
-   guárdalas como perfil; se reutilizará automáticamente con ese banco.
-2. Si el formato necesita lógica especial (p.ej. PDF), implementa la interfaz
-   `StatementParser` en `src/server/import/parsers/` y regístrala en el índice
-   de parsers (fase 3).
+   marca «Recordar este formato»; se reconocerá automáticamente por sus
+   cabeceras (`ImportProfile.headerSignature`).
+2. Si la detección automática de columnas falla con tu banco, añade sus nombres
+   de columna a los patrones de `suggestConfig` en `src/server/import/detect.ts`.
+3. Si el formato necesita lógica especial (PDF, Norma 43…), implementa la
+   interfaz `StatementParser` (`src/server/import/types.ts`) en
+   `src/server/import/parsers/` y añádela a `PARSERS` en `parsers/index.ts`.
 3. Añade un extracto de ejemplo **anonimizado** en `tests/fixtures/` y un test.
 
 ## Categorías
@@ -165,6 +182,12 @@ npm test
 - `tests/domain/`: parser de importes y fechas, normalización de textos, hash
   anti-duplicados (reimportar, extractos solapados, operaciones idénticas
   legítimas, duplicados probables), cálculo de ahorro y exclusión de transferencias.
+- `tests/import/`: lectura de extractos (Windows-1252 con títulos, UTF-8 con
+  cargo/abono, XLSX, tarjeta con signos invertidos, XLS antiguo, HTML
+  disfrazado), filas no válidas, coherencia de saldo.
+- `tests/db/imports.test.ts`: flujo completo — reimportar sin duplicar,
+  extractos solapados, duplicados probables, exclusión de filas, deshacer,
+  ajuste de saldo inicial, perfiles por banco.
 - `tests/db/`: restricciones de integridad, cuentas (saldo calculado, conciliación,
   auditoría), movimientos (alta, edición, duplicados, filtros) y transferencias
   internas, sobre una BD SQLite temporal (nunca toca `data/`).
