@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+/*
+ * Paleta semántica (requisito §31):
+ *   positivo -> verde, negativo -> rojo, alerta -> naranja, información -> azul.
+ * Usar SIEMPRE estos tokens (text-positive, bg-warning/10...) en lugar de
+ * colores sueltos, para que el significado del color sea consistente.
+ */
+@theme {
+  --color-positive: #15803d;
+  --color-negative: #dc2626;
+  --color-warning: #ea580c;
+  --color-info: #2563eb;
+
+  --color-surface: #ffffff;
+  --color-canvas: #f6f7f9;
+  --color-border: #e4e7ec;
+  --color-ink: #101828;
+  --color-muted: #667085;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+  body {
+    @apply bg-canvas text-ink antialiased;
+    font-feature-settings: "tnum" 1; /* cifras tabulares: columnas de importes alineadas */
+  }
+}

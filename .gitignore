@@ -1,0 +1,26 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Cliente Prisma generado
+src/generated/
+
+# Datos: NUNCA subir bases de datos ni copias de seguridad al repositorio
+data/
+backups/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Entorno
+.env
+.env.*
+!.env.example
+
+.DS_Store
+npm-debug.log*

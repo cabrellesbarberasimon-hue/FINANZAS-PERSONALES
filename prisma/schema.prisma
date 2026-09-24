@@ -1,0 +1,814 @@
+// =============================================================================
+// Finanzas Personales — modelo de datos
+// =============================================================================
+//
+// Convenciones (ver docs/ARQUITECTURA.md §2):
+//
+// * DINERO: siempre en CÉNTIMOS como entero (`Int`). Nunca `Float`.
+//   Ejemplo: 1.234,56 € -> 123456. Signo: negativo = sale dinero, positivo = entra.
+// * CANTIDADES Y PRECIOS DE INVERSIÓN (participaciones, VL): `Decimal`
+//   (precisión arbitraria; los fondos usan hasta 6 decimales en participaciones).
+// * FECHAS CONTABLES: `DateTime` a las 00:00:00 UTC del día (solo importa la fecha).
+// * HISTÓRICOS: saldos, precios y valoraciones se guardan como filas nuevas con
+//   fecha; nunca se sobrescribe el valor de una fecha anterior.
+// * MULTIUSUARIO: toda entidad raíz cuelga de `User` para poder añadir
+//   autenticación sin migrar datos. Hoy existe un único usuario local.
+// * PORTABILIDAD: solo tipos soportados por SQLite y PostgreSQL. Los JSON se
+//   guardan como `String` (SQLite no tiene tipo JSON nativo en Prisma).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// -----------------------------------------------------------------------------
+// Usuario y configuración
+// -----------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String?  @unique
+  // Preparado para autenticación futura. Nunca se guardan credenciales bancarias.
+  passwordHash String?
+  baseCurrency String   @default("EUR")
+  locale       String   @default("es-ES")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accounts                  Account[]
+  transactions              Transaction[]
+  categories                Category[]
+  rules                     CategorizationRule[]
+  categorizationCorrections CategorizationCorrection[]
+  imports                   Import[]
+  importProfiles            ImportProfile[]
+  investments               Investment[]
+  liabilities               Liability[]
+  budgets                   Budget[]
+  goals                     FinancialGoal[]
+  netWorthSnapshots         NetWorthSnapshot[]
+  recurringExpenses         RecurringExpense[]
+  reviewFlags               ReviewFlag[]
+  auditLogs                 AuditLog[]
+  settings                  AppSetting[]
+}
+
+/// Clave/valor por usuario: estado del asistente inicial, preferencias, etc.
+model AppSetting {
+  userId    String
+  key       String
+  value     String
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+}
+
+// -----------------------------------------------------------------------------
+// Cuentas y saldos
+// -----------------------------------------------------------------------------
+
+enum AccountType {
+  CHECKING // cuenta corriente
+  SAVINGS // cuenta remunerada
+  CASH // efectivo
+  CARD // tarjeta (saldo normalmente negativo = deuda)
+  BROKER // efectivo en broker
+  INVESTMENT // cuenta de inversión valorada manualmente (sin detalle de posiciones)
+  OTHER // otros activos (vivienda, vehículo...) valorados manualmente
+}
+
+model Account {
+  id             String      @id @default(cuid())
+  userId         String
+  name           String
+  institution    String?
+  type           AccountType
+  currency       String      @default("EUR")
+  /// Últimos 4 dígitos / IBAN parcial para reconocer la cuenta. Nunca credenciales.
+  identifier     String?
+  color          String?
+  notes          String?
+  /// Saldo de apertura (céntimos) a fecha `openingDate`: punto de partida del
+  /// saldo calculado. Los movimientos anteriores a esa fecha no lo modifican.
+  openingBalance Int         @default(0)
+  openingDate    DateTime
+  archived       Boolean     @default(false)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user            User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions    Transaction[]
+  balances        AccountBalance[]
+  imports         Import[]
+  importProfiles  ImportProfile[]
+  rules           CategorizationRule[]
+  investments     Investment[]
+  liabilitiesPaid Liability[]
+  goalLinks       GoalLink[]
+  reviewFlags     ReviewFlag[]
+
+  @@unique([userId, name])
+  @@index([userId, type])
+}
+
+enum BalanceSource {
+  MANUAL // introducido a mano
+  IMPORT // saldo que venía en el extracto
+  OPENING // saldo inicial del asistente
+}
+
+/// Histórico de saldos DECLARADOS (lo que dice el banco o el usuario).
+/// El saldo CALCULADO se deriva de openingBalance + movimientos; la
+/// conciliación compara ambos. Nunca se sobrescribe: una fila por fecha y origen.
+model AccountBalance {
+  id        String        @id @default(cuid())
+  accountId String
+  date      DateTime
+  balance   Int
+  source    BalanceSource
+  importId  String?
+  notes     String?
+  createdAt DateTime      @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  import  Import? @relation(fields: [importId], references: [id], onDelete: SetNull)
+
+  @@unique([accountId, date, source])
+  @@index([accountId, date])
+}
+
+// -----------------------------------------------------------------------------
+// Categorías
+// -----------------------------------------------------------------------------
+
+enum CategoryKind {
+  EXPENSE
+  INCOME
+  TRANSFER // movimientos entre cuentas propias
+  INVESTMENT // aportaciones / retiradas de inversión
+}
+
+model Category {
+  id        String       @id @default(cuid())
+  userId    String
+  name      String
+  kind      CategoryKind
+  icon      String?
+  color     String?
+  sortOrder Int          @default(0)
+  /// Categorías del sistema (Transferencias, Inversiones) no se pueden borrar.
+  isSystem  Boolean      @default(false)
+  archived  Boolean      @default(false)
+  createdAt DateTime     @default(now())
+
+  user          User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subcategories Subcategory[]
+  transactions  Transaction[]
+  rules         CategorizationRule[]
+  budgets       Budget[]
+  corrections   CategorizationCorrection[]
+  recurring     RecurringExpense[]
+
+  @@unique([userId, name])
+}
+
+model Subcategory {
+  id                     String   @id @default(cuid())
+  categoryId             String
+  name                   String
+  sortOrder              Int      @default(0)
+  /// Marca por defecto para ingresos/gastos no recurrentes (p.ej. "Otros ingresos").
+  isExtraordinaryDefault Boolean  @default(false)
+  archived               Boolean  @default(false)
+  createdAt              DateTime @default(now())
+
+  category     Category                   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  rules        CategorizationRule[]
+  budgets      Budget[]
+  corrections  CategorizationCorrection[]
+  recurring    RecurringExpense[]
+
+  @@unique([categoryId, name])
+}
+
+// -----------------------------------------------------------------------------
+// Movimientos
+// -----------------------------------------------------------------------------
+
+enum TransactionKind {
+  INCOME // cuenta para ingresos y ahorro
+  EXPENSE // cuenta para gastos y ahorro
+  TRANSFER // entre cuentas propias: excluido de ingresos/gastos/ahorro
+  INVESTMENT // aportación/retirada a inversión: excluido de gastos, se muestra aparte
+  ADJUSTMENT // ajuste manual de conciliación: excluido de ingresos/gastos
+}
+
+enum CategorizationSource {
+  NONE
+  RULE
+  MANUAL
+  IMPORT // la categoría venía en el propio fichero
+}
+
+enum TransactionSource {
+  IMPORT
+  MANUAL
+}
+
+model Transaction {
+  id        String @id @default(cuid())
+  userId    String
+  accountId String
+
+  date      DateTime
+  valueDate DateTime?
+  /// Céntimos con signo: negativo = salida de dinero.
+  amount    Int
+  currency  String    @default("EUR")
+
+  descriptionRaw   String // tal cual viene del banco, nunca se modifica
+  descriptionClean String // normalizado (mayúsculas, sin ruido) — editable
+  merchant         String?
+  notes            String?
+
+  kind                 TransactionKind
+  categoryId           String?
+  subcategoryId        String?
+  categorizationSource CategorizationSource @default(NONE)
+  ruleId               String?
+  isExtraordinary      Boolean              @default(false)
+
+  /// Saldo tras la operación según el banco (si el extracto lo trae).
+  balanceAfter Int?
+
+  // --- Deduplicación (docs/ARQUITECTURA.md §6) ---
+  /// sha256(cuenta | fecha | importe | descripción normalizada | nº de ocurrencia)
+  dedupHash  String
+  /// n-ésima operación idéntica dentro del mismo día (0, 1, 2...)
+  occurrence Int    @default(0)
+
+  // --- Trazabilidad ---
+  source         TransactionSource
+  importId       String?
+  importRowIndex Int?
+
+  /// Pareja de transferencia interna (relación 1:1 simétrica: ambos lados apuntan).
+  transferPeerId String? @unique
+
+  recurringExpenseId String?
+
+  /// El usuario ha revisado/validado el movimiento.
+  reviewed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user                  User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account               Account                    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category              Category?                  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subcategory           Subcategory?               @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  rule                  CategorizationRule?        @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  import                Import?                    @relation(fields: [importId], references: [id], onDelete: SetNull)
+  transferPeer          Transaction?               @relation("TransferPair", fields: [transferPeerId], references: [id], onDelete: SetNull)
+  transferPeerOf        Transaction?               @relation("TransferPair")
+  recurringExpense      RecurringExpense?          @relation(fields: [recurringExpenseId], references: [id], onDelete: SetNull)
+  investmentTransaction InvestmentTransaction?
+  reviewFlags           ReviewFlag[]               @relation("FlagTransaction")
+  relatedReviewFlags    ReviewFlag[]               @relation("FlagRelatedTransaction")
+  corrections           CategorizationCorrection[]
+
+  /// Garantía dura contra duplicados exactos: misma cuenta + mismo hash.
+  @@unique([accountId, dedupHash])
+  @@index([userId, date])
+  @@index([accountId, date])
+  @@index([categoryId])
+  @@index([importId])
+}
+
+// -----------------------------------------------------------------------------
+// Categorización automática
+// -----------------------------------------------------------------------------
+
+enum RuleMatchType {
+  CONTAINS
+  STARTS_WITH
+  EQUALS
+  REGEX
+}
+
+enum RuleField {
+  DESCRIPTION
+  MERCHANT
+}
+
+enum RuleOrigin {
+  SYSTEM // reglas iniciales
+  USER // creada a mano
+  LEARNED // aceptada desde una sugerencia por correcciones repetidas
+}
+
+model CategorizationRule {
+  id            String           @id @default(cuid())
+  userId        String
+  name          String?
+  field         RuleField        @default(DESCRIPTION)
+  matchType     RuleMatchType    @default(CONTAINS)
+  pattern       String
+  /// Condiciones opcionales
+  accountId     String?
+  amountMin     Int?
+  amountMax     Int?
+  /// Resultado
+  categoryId    String
+  subcategoryId String?
+  setKind       TransactionKind?
+  setMerchant   String?
+  /// Mayor prioridad gana. En empate, la regla más específica (patrón más largo).
+  priority      Int              @default(0)
+  active        Boolean          @default(true)
+  origin        RuleOrigin       @default(USER)
+  timesApplied  Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account?      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category     Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategory  Subcategory?  @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([userId, active])
+}
+
+/// Cada corrección manual de categoría. Base del aprendizaje: si la misma
+/// "clave de comercio" se corrige N veces a la misma categoría, se sugiere regla.
+model CategorizationCorrection {
+  id            String   @id @default(cuid())
+  userId        String
+  transactionId String?
+  merchantKey   String
+  categoryId    String
+  subcategoryId String?
+  /// Sugerencia ya mostrada y rechazada: no volver a sugerir.
+  dismissed     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  category    Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategory Subcategory? @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, merchantKey])
+}
+
+// -----------------------------------------------------------------------------
+// Importación de extractos
+// -----------------------------------------------------------------------------
+
+enum ImportStatus {
+  PREVIEW // analizado, pendiente de confirmar
+  COMMITTED // operaciones guardadas
+  REVERTED // deshecho: sus operaciones se eliminaron
+  FAILED
+}
+
+/// Formato bancario reutilizable: mapeo de columnas + reglas de parseo.
+model ImportProfile {
+  id              String   @id @default(cuid())
+  userId          String
+  name            String
+  accountId       String?
+  /// JSON: ver src/server/import/types.ts (ImportProfileConfig)
+  config          String
+  /// Encabezados normalizados que identifican este formato (autodetección).
+  headerSignature String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account Account? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  imports Import[]
+
+  @@unique([userId, name])
+}
+
+model Import {
+  id                   String       @id @default(cuid())
+  userId               String
+  accountId            String
+  profileId            String?
+  fileName             String
+  fileType             String // csv | xlsx | xls | pdf (futuro)
+  /// sha256 del fichero: avisa si se sube el mismo fichero dos veces.
+  fileHash             String
+  status               ImportStatus @default(PREVIEW)
+  /// JSON con el mapeo de columnas usado (auditoría).
+  mapping              String
+  rowsTotal            Int          @default(0)
+  rowsNew              Int          @default(0)
+  rowsDuplicate        Int          @default(0) // duplicados exactos: no insertados
+  rowsFlagged          Int          @default(0) // posibles duplicados: insertados y marcados
+  rowsSkipped          Int          @default(0) // filas inválidas o descartadas por el usuario
+  periodStart          DateTime?
+  periodEnd            DateTime?
+  /// Último saldo del extracto (para conciliación).
+  statementBalance     Int?
+  statementBalanceDate DateTime?
+  errorMessage         String?
+  createdAt            DateTime     @default(now())
+  committedAt          DateTime?
+  revertedAt           DateTime?
+
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account                Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  profile                ImportProfile?          @relation(fields: [profileId], references: [id], onDelete: SetNull)
+  transactions           Transaction[]
+  balances               AccountBalance[]
+  reviewFlags            ReviewFlag[]
+  investmentTransactions InvestmentTransaction[]
+
+  @@index([userId, createdAt])
+  @@index([accountId, fileHash])
+}
+
+// -----------------------------------------------------------------------------
+// Inversiones
+// -----------------------------------------------------------------------------
+
+enum AssetType {
+  INDEX_FUND
+  ETF
+  ACTIVE_FUND
+  STOCK
+  PIAS
+  PENSION_PLAN
+  CRYPTO
+  OTHER
+}
+
+enum ValuationMode {
+  /// valor = participaciones × último precio (fondos, ETF, acciones, cripto)
+  UNITS
+  /// valor = último valor total introducido (PIAS, seguros, productos opacos)
+  TOTAL_VALUE
+}
+
+model Investment {
+  id            String        @id @default(cuid())
+  userId        String
+  name          String
+  assetType     AssetType
+  isin          String?
+  ticker        String?
+  platform      String? // broker / gestora
+  /// Cuenta de broker donde se liquida (opcional).
+  accountId     String?
+  currency      String        @default("EUR")
+  valuationMode ValuationMode @default(UNITS)
+  notes         String?
+  archived      Boolean       @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account?                @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  transactions InvestmentTransaction[]
+  prices       InvestmentPrice[]
+  goalLinks    GoalLink[]
+  reviewFlags  ReviewFlag[]
+
+  @@unique([userId, name])
+  @@index([userId, isin])
+}
+
+enum InvestmentTxType {
+  BUY // aportación: compra de participaciones
+  SELL // reembolso / venta
+  DIVIDEND // reparto en efectivo
+  FEE // comisión cobrada aparte (custodia...)
+}
+
+/// Fuente de verdad de las APORTACIONES. Participaciones, precio medio,
+/// capital aportado y rentabilidad se DERIVAN de aquí + InvestmentPrice.
+model InvestmentTransaction {
+  id                String           @id @default(cuid())
+  investmentId      String
+  date              DateTime
+  type              InvestmentTxType
+  /// Participaciones (positivo). Null en modo TOTAL_VALUE o DIVIDEND/FEE.
+  units             Decimal?
+  /// Precio por participación en la operación.
+  price             Decimal?
+  /// Importe en céntimos, positivo. BUY: dinero invertido (sin comisiones).
+  /// SELL: importe bruto recibido.
+  amount            Int
+  fees              Int              @default(0)
+  /// Movimiento bancario que financia esta operación (trazabilidad).
+  cashTransactionId String?          @unique
+  importId          String?
+  notes             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  investment      Investment   @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  cashTransaction Transaction? @relation(fields: [cashTransactionId], references: [id], onDelete: SetNull)
+  import          Import?      @relation(fields: [importId], references: [id], onDelete: SetNull)
+
+  @@index([investmentId, date])
+}
+
+enum PriceSource {
+  MANUAL
+  IMPORT
+  API // reservado: conexión futura a APIs de mercado (no implementada)
+}
+
+/// Histórico de valoraciones. Una fila por fecha: nunca se pisa un valor
+/// anterior con uno nuevo; corregir una fecha concreta queda en AuditLog.
+model InvestmentPrice {
+  id           String      @id @default(cuid())
+  investmentId String
+  date         DateTime
+  /// Valor liquidativo / cotización (modo UNITS).
+  price        Decimal?
+  /// Valor total de la posición en céntimos (modo TOTAL_VALUE).
+  totalValue   Int?
+  source       PriceSource @default(MANUAL)
+  createdAt    DateTime    @default(now())
+
+  investment Investment @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+
+  @@unique([investmentId, date])
+}
+
+// -----------------------------------------------------------------------------
+// Pasivos (deudas)
+// -----------------------------------------------------------------------------
+
+enum LiabilityType {
+  MORTGAGE
+  LOAN
+  FINANCING
+  CREDIT_CARD
+  OTHER
+}
+
+model Liability {
+  id               String        @id @default(cuid())
+  userId           String
+  name             String
+  type             LiabilityType
+  lender           String?
+  originalAmount   Int?
+  interestRate     Decimal? // TIN anual en %
+  startDate        DateTime?
+  endDate          DateTime?
+  monthlyPayment   Int?
+  /// Cuenta desde la que se pagan las cuotas.
+  paymentAccountId String?
+  notes            String?
+  archived         Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  paymentAccount Account?           @relation(fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  balances       LiabilityBalance[]
+
+  @@unique([userId, name])
+}
+
+/// Histórico de deuda pendiente (positivo = se debe). Nunca se sobrescribe.
+model LiabilityBalance {
+  id          String   @id @default(cuid())
+  liabilityId String
+  date        DateTime
+  balance     Int
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  liability Liability @relation(fields: [liabilityId], references: [id], onDelete: Cascade)
+
+  @@unique([liabilityId, date])
+}
+
+// -----------------------------------------------------------------------------
+// Presupuestos y objetivos
+// -----------------------------------------------------------------------------
+
+/// Límite mensual por categoría (o subcategoría). Cambiar un presupuesto crea
+/// una fila nueva con otro `validFrom`, para no reescribir meses pasados.
+model Budget {
+  id            String   @id @default(cuid())
+  userId        String
+  categoryId    String
+  subcategoryId String?
+  amount        Int
+  /// Primer mes de vigencia, formato "YYYY-MM".
+  validFrom     String
+  /// Último mes de vigencia (incluido), null = indefinido.
+  validTo       String?
+  createdAt     DateTime @default(now())
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category    Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategory Subcategory? @relation(fields: [subcategoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId, subcategoryId, validFrom])
+}
+
+enum GoalType {
+  EMERGENCY_FUND
+  INVESTMENT
+  TRAVEL
+  HOUSING
+  VEHICLE
+  OTHER
+}
+
+enum GoalTracking {
+  LINKED // progreso = saldo de cuentas / valor de inversiones vinculadas
+  MANUAL // progreso = importe introducido a mano
+}
+
+model FinancialGoal {
+  id           String       @id @default(cuid())
+  userId       String
+  name         String
+  type         GoalType
+  targetAmount Int
+  targetDate   DateTime?
+  tracking     GoalTracking @default(LINKED)
+  manualAmount Int?
+  achievedAt   DateTime?
+  archived     Boolean      @default(false)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  links GoalLink[]
+}
+
+model GoalLink {
+  id           String  @id @default(cuid())
+  goalId       String
+  accountId    String?
+  investmentId String?
+
+  goal       FinancialGoal @relation(fields: [goalId], references: [id], onDelete: Cascade)
+  account    Account?      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  investment Investment?   @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+
+  @@unique([goalId, accountId, investmentId])
+}
+
+// -----------------------------------------------------------------------------
+// Patrimonio
+// -----------------------------------------------------------------------------
+
+/// Foto de patrimonio a una fecha (normalmente fin de mes). Es un CACHÉ
+/// reproducible: se puede recalcular desde movimientos, saldos y precios.
+/// `isClosed` congela el mes para que ediciones posteriores muestren diferencia
+/// en lugar de reescribir silenciosamente el histórico.
+model NetWorthSnapshot {
+  id              String   @id @default(cuid())
+  userId          String
+  date            DateTime
+  liquidity       Int // cuentas corrientes, remuneradas, efectivo, broker
+  investments     Int // valor de mercado de inversiones
+  otherAssets     Int
+  liabilities     Int // deudas (positivo) incl. tarjetas con saldo negativo
+  netWorth        Int
+  investedCapital Int // capital aportado neto a esa fecha
+  /// JSON con desglose por cuenta/inversión y lista de datos pendientes.
+  breakdown       String
+  /// Hay componentes sin dato (p.ej. inversión sin precio): no es fiable.
+  incomplete      Boolean  @default(false)
+  isClosed        Boolean  @default(false)
+  computedAt      DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, date])
+}
+
+// -----------------------------------------------------------------------------
+// Gastos recurrentes
+// -----------------------------------------------------------------------------
+
+enum RecurrenceFrequency {
+  WEEKLY
+  MONTHLY
+  BIMONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum RecurringStatus {
+  DETECTED // sugerido por el detector
+  CONFIRMED // aceptado por el usuario
+  DISMISSED // descartado: no volver a sugerir
+  ENDED // dado de baja
+}
+
+model RecurringExpense {
+  id            String              @id @default(cuid())
+  userId        String
+  name          String
+  merchantKey   String
+  categoryId    String?
+  subcategoryId String?
+  frequency     RecurrenceFrequency
+  /// Importe típico (céntimos, positivo).
+  typicalAmount Int
+  lastDate      DateTime?
+  nextExpected  DateTime?
+  status        RecurringStatus     @default(DETECTED)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  subcategory  Subcategory?  @relation(fields: [subcategoryId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@unique([userId, merchantKey])
+}
+
+// -----------------------------------------------------------------------------
+// Calidad del dato
+// -----------------------------------------------------------------------------
+
+enum ReviewFlagType {
+  POSSIBLE_DUPLICATE // parecido a otra operación existente
+  POSSIBLE_TRANSFER // candidata a transferencia interna sin emparejar
+  BALANCE_MISMATCH // saldo banco ≠ saldo calculado
+  STALE_INVESTMENT // inversión sin valoración reciente
+  SUSPICIOUS // importe atípico, fecha futura, etc.
+  PENDING_REVIEW // marcado por el usuario
+}
+
+enum ReviewFlagStatus {
+  OPEN
+  RESOLVED
+  DISMISSED
+}
+
+/// Los "sin categoría" no necesitan flag: se consultan directamente.
+model ReviewFlag {
+  id                   String           @id @default(cuid())
+  userId               String
+  type                 ReviewFlagType
+  status               ReviewFlagStatus @default(OPEN)
+  message              String
+  /// JSON con datos de contexto (importes, diferencias, candidatos...).
+  data                 String?
+  transactionId        String?
+  relatedTransactionId String?
+  accountId            String?
+  investmentId         String?
+  importId             String?
+  resolution           String?
+  createdAt            DateTime         @default(now())
+  resolvedAt           DateTime?
+
+  user               User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction        Transaction? @relation("FlagTransaction", fields: [transactionId], references: [id], onDelete: Cascade)
+  relatedTransaction Transaction? @relation("FlagRelatedTransaction", fields: [relatedTransactionId], references: [id], onDelete: SetNull)
+  account            Account?     @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  investment         Investment?  @relation(fields: [investmentId], references: [id], onDelete: Cascade)
+  import             Import?      @relation(fields: [importId], references: [id], onDelete: SetNull)
+
+  @@index([userId, status, type])
+  @@index([transactionId])
+}
+
+// -----------------------------------------------------------------------------
+// Auditoría
+// -----------------------------------------------------------------------------
+
+/// Registro de cambios sobre datos financieros (editar, borrar, deshacer
+/// importación...). Permite saber quién/cuándo/qué cambió y revertir errores.
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  entity    String // "Transaction", "InvestmentPrice"...
+  entityId  String
+  action    String // create | update | delete | revert
+  before    String? // JSON
+  after     String? // JSON
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entity, entityId])
+  @@index([userId, createdAt])
+}
