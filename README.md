@@ -8,8 +8,9 @@ patrimonio, presupuestos y objetivos.
 corregir → automatización → simplicidad. Nunca se inventan datos: si falta
 información se muestra **"Pendiente de datos"**.
 
-> Estado: **Fase 1 completada** (arquitectura, base de datos, dominio base,
-> navegación). El diseño completo y el plan por fases están en
+> Estado: **Fases 1 y 2 completadas**: arquitectura, base de datos, cuentas
+> (saldos, conciliación, deudas), movimientos (filtros, alta manual, edición
+> con historial, transferencias internas) y asistente inicial. El diseño completo y el plan por fases están en
 > [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
 ---
@@ -42,7 +43,7 @@ npm run build && npm start
 ### Modo demo (datos ficticios, separados de los tuyos)
 
 ```bash
-npm run demo:setup   # crea data/demo.db con datos ficticios
+npm run demo:setup   # crea data/demo.db con datos ficticios (6 cuentas, ~220 movimientos, marzo-sept 2026)
 npm run demo:dev     # arranca la app sobre data/demo.db (banner naranja "MODO DEMO")
 npm run demo:delete  # elimina completamente los datos demo
 ```
@@ -96,6 +97,23 @@ a BD ni red, para que sean reproducibles y testeables. Las páginas solo orquest
   sustituir el adaptador en `src/server/prisma.ts` por `@prisma/adapter-pg`,
   regenerar migraciones y trasladar los datos con el backup JSON.
 
+## Uso (fase 2)
+
+- **Cuentas**: crea cada cuenta con su saldo y la fecha de ese saldo (saldo al final
+  de ese día). El saldo actual se calcula como saldo inicial + movimientos
+  posteriores. Registra de vez en cuando el saldo que indica tu banco: la
+  aplicación lo compara con el suyo y, si no cuadra, te indica en qué periodo
+  aparece la diferencia.
+- **Otros activos** (vivienda, coche) y cuentas de inversión sin detalle: tipo
+  «Otros activos» / «Inversión», valorados con saldos manuales.
+- **Deudas**: en Cuentas → «+ Deuda», con histórico de deuda pendiente.
+- **Movimientos**: los filtros viven en la URL (`/movimientos?mes=2026-09&tipo=EXPENSE`),
+  así que cualquier cifra puede enlazar a las operaciones que la forman.
+  Cada edición queda en el historial del movimiento.
+- **Transferencias internas**: abre uno de los dos movimientos; la app propone
+  contrapartidas en otras cuentas (importe opuesto, ±5 días). Vinculadas, no
+  cuentan como ingreso, gasto ni ahorro.
+
 ## Backup
 
 *(Implementación completa en la fase 10.)*
@@ -147,8 +165,9 @@ npm test
 - `tests/domain/`: parser de importes y fechas, normalización de textos, hash
   anti-duplicados (reimportar, extractos solapados, operaciones idénticas
   legítimas, duplicados probables), cálculo de ahorro y exclusión de transferencias.
-- `tests/db/`: restricciones de integridad sobre una BD SQLite temporal
-  (nunca toca `data/`).
+- `tests/db/`: restricciones de integridad, cuentas (saldo calculado, conciliación,
+  auditoría), movimientos (alta, edición, duplicados, filtros) y transferencias
+  internas, sobre una BD SQLite temporal (nunca toca `data/`).
 
 ## Privacidad y seguridad
 

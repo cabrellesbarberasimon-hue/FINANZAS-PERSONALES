@@ -161,3 +161,21 @@ export function formatPercent(
   }).format(value);
   return `${signed && value > 0 ? "+" : ""}${text} %`;
 }
+
+/**
+ * Importe tecleado por el usuario en un formulario: admite "45,23", "45.23",
+ * "1.234,56" y "1,234.56". El separador se decide con la propia cadena.
+ */
+export function parseUserAmount(input: string): Cents | null {
+  const s = input.trim();
+  if (s === "") return null;
+  // Un único "." seguido de 1-2 dígitos finales es decimal ("45.5"); si no, convención española.
+  const sep = /^[^,]*\.\d{1,2}$/.test(s.replace(/[\s€]/g, "")) ? "." : detectDecimalSeparator([s]);
+  return parseAmount(s, sep);
+}
+
+/** Céntimos -> "1234,56" (sin símbolo ni miles), para rellenar formularios. */
+export function centsToInput(cents: Cents): string {
+  const abs = Math.abs(cents);
+  return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)},${String(abs % 100).padStart(2, "0")}`;
+}

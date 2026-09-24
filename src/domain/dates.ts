@@ -125,3 +125,16 @@ export function daysBetween(a: Date, b: Date): number {
 export function formatDateES(date: Date): string {
   return `${String(date.getUTCDate()).padStart(2, "0")}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${date.getUTCFullYear()}`;
 }
+
+export const APP_TIME_ZONE = process.env.APP_TIME_ZONE ?? "Europe/Madrid";
+
+/** Fecha de HOY en la zona horaria del usuario, como fecha contable (00:00 UTC). */
+export function today(timeZone: string = APP_TIME_ZONE): Date {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+  return parseDate(parts, "YYYY-MM-DD")!;
+}

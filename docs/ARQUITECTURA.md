@@ -507,16 +507,26 @@ correcciones como `dismissed` para no insistir.
 | Moneda distinta de EUR | Sumas incorrectas | V1: todo en EUR; cuentas/inversiones en otra moneda se permiten pero se marcan y NO se suman hasta tener tipo de cambio (pendiente de datos). |
 | SQLite y concurrencia | Bloqueos | Uso monousuario; WAL si hiciera falta. PostgreSQL al desplegar. |
 | Corrupción/pérdida del fichero | Pérdida de datos | Backups (fase 10) + recordatorio si el último backup es antiguo. |
+| Cuotas de préstamos: una parte es amortización (reduce deuda, no es gasto) y otra intereses (gasto) | Gasto sobrestimado | Fase 7: al vincular una cuota con una `Liability`, separar intereses y amortización. Hasta entonces, la cuota se categoriza como el usuario decida. |
 | Dependencia de desarrollo `prisma` CLI arrastra `mysql2` con avisos de seguridad | Ninguno en ejecución (no se usa MySQL; solo en la CLI de desarrollo) | Actualizar cuando Prisma publique el parche. |
 
 ---
+
+### Decisiones confirmadas (fase 2)
+
+- Otros activos (vivienda, coche) = `Account` tipo `OTHER` con valoraciones manuales.
+- Reembolsos de compras = `EXPENSE` con importe positivo (restan gasto); devoluciones de Hacienda = `INCOME` / Devolución.
+- Aportaciones a inversión: ni gasto ni reducción del ahorro; se muestran aparte.
+- El saldo inicial de una cuenta es el saldo al **final** del día indicado: los movimientos de ese día o anteriores no se vuelven a sumar.
+- Los movimientos importados no permiten cambiar fecha, importe ni descripción original (reflejan el extracto); los manuales sí, recalculando su hash.
+- Un duplicado exacto en el alta manual exige marcar explícitamente «es otra operación distinta».
 
 ## 13. Orden de implementación
 
 | Fase | Contenido | Criterio de "terminado" |
 |---|---|---|
 | **1** ✅ | Arquitectura, esquema, migración inicial, seed de categorías/reglas, dominio base (dinero, fechas, texto, hash anti-duplicados, ahorro), layout y navegación, modo demo aislado, README | Tests de dominio y de integridad de BD en verde; build OK |
-| **2** | Cuentas (CRUD, saldo inicial, saldos declarados, pasivos), movimientos (tabla, filtros, edición con AuditLog, alta manual, vincular transferencias), asistente inicial, datos demo | Saldo calculado correcto; editar deja traza |
+| **2** ✅ | Cuentas (CRUD, saldo inicial, saldos declarados, pasivos), movimientos (tabla, filtros, edición con AuditLog, alta manual, vincular transferencias), asistente inicial, datos demo | Saldo calculado correcto; editar deja traza |
 | **3** | Importación CSV/XLSX/XLS: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
 | **4** | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
 | **5** | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |

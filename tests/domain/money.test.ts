@@ -77,3 +77,20 @@ describe("formato", () => {
     expect(formatPercent(12.5, { signed: true })).toBe("+12,5 %");
   });
 });
+
+import { centsToInput, parseUserAmount } from "@/domain/money";
+
+describe("parseUserAmount (formularios)", () => {
+  it.each([
+    ["45,23", 4523],
+    ["45.23", 4523],
+    ["45.5", 4550],
+    ["1.234,56", 123456],
+    ["1,234.56", 123456],
+    ["1.234", 123400],
+    ["300", 30000],
+  ])("%s -> %i", (s, c) => expect(parseUserAmount(s)).toBe(c));
+  it("centsToInput es reversible", () => {
+    for (const c of [0, 5, 4523, -123456]) expect(parseUserAmount(centsToInput(c))).toBe(c);
+  });
+});
