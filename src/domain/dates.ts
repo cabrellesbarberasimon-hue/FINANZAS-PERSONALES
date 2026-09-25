@@ -138,3 +138,10 @@ export function today(timeZone: string = APP_TIME_ZONE): Date {
   }).format(new Date());
   return parseDate(parts, "YYYY-MM-DD")!;
 }
+
+/** "2026-09" -> "septiembre 2026" */
+export function monthLabel(key: string): string {
+  const { start } = monthRange(key);
+  const name = new Intl.DateTimeFormat("es-ES", { month: "long", timeZone: "UTC" }).format(start);
+  return `${name} ${start.getUTCFullYear()}`;
+}

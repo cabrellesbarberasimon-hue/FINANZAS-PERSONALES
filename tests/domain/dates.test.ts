@@ -54,3 +54,8 @@ describe("meses", () => {
     expect(addMonths("2026-11", 14)).toBe("2028-01");
   });
 });
+
+import { monthLabel } from "@/domain/dates";
+describe("monthLabel", () => {
+  it("nombre del mes en español", () => expect(monthLabel("2026-09")).toBe("septiembre 2026"));
+});

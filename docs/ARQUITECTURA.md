@@ -443,6 +443,18 @@ Saldo de una cuenta a una fecha = `openingBalance` + Σ movimientos entre
 `openingDate` y esa fecha. Si el usuario solo registra saldos manuales (p.ej. una
 cuenta sin extractos), se usa el último `AccountBalance` declarado.
 
+**Implementación (fase 5)**: [`src/domain/networth.ts`](../src/domain/networth.ts)
+(puro) y `src/server/services/networth.ts` (`netWorthAt(fecha)`), siempre desde
+los datos de origen. Reglas:
+- Una cuenta cuyo saldo inicial es **posterior** a la fecha consultada no tiene
+  valor conocido → el total queda **incompleto** y se dice qué falta; nunca 0.
+- Un saldo negativo (tarjeta, descubierto) cuenta como **deuda**, no como activo negativo.
+- Cuentas en otra moneda: excluidas y listadas como pendientes (sin tipo de cambio).
+- Cuentas archivadas: excluidas (cerradas). Deudas: último saldo registrado en
+  o antes de la fecha; sin saldo → pendiente (salvo que empiece después).
+- Las variaciones («+X € este mes», «+Y % último año») solo se calculan si las
+  dos fotos están completas.
+
 **Puente mensual (§17)** — explica *por qué* cambió el patrimonio:
 
 ```
@@ -562,7 +574,7 @@ LIQUIDACION TARJETA, RETIRADA CAJERO…). En el resto de casos se crea un aviso
 | **2** ✅ | Cuentas (CRUD, saldo inicial, saldos declarados, pasivos), movimientos (tabla, filtros, edición con AuditLog, alta manual, vincular transferencias), asistente inicial, datos demo | Saldo calculado correcto; editar deja traza |
 | **3** ✅ | Importación CSV/XLSX: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
 | **4** ✅ | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
-| **5** | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |
+| **5** ✅ | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |
 | **6** | Inversiones: aportaciones, VL, posición, rentabilidad simple, TIR, dashboard de inversiones | Tests de aportaciones vs. rentabilidad |
 | **7** | Patrimonio: activos − pasivos, histórico mensual, snapshots, puente mensual | Puente cuadra o muestra la diferencia |
 | **8** | Presupuestos y objetivos | |

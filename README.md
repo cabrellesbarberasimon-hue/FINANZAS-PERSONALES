@@ -8,12 +8,12 @@ patrimonio, presupuestos y objetivos.
 corregir → automatización → simplicidad. Nunca se inventan datos: si falta
 información se muestra **"Pendiente de datos"**.
 
-> Estado: **Fases 1 a 4 completadas**: arquitectura, base de datos, cuentas
+> Estado: **Fases 1 a 5 completadas**: arquitectura, base de datos, cuentas
 > (saldos, conciliación, deudas), movimientos (filtros, alta manual, edición
 > con historial, transferencias internas), asistente inicial e importación de
 > extractos CSV/XLSX con anti-duplicados y conciliación, categorización
 > automática con reglas que aprenden de tus correcciones, detección de
-> transferencias internas y revisión de avisos. El diseño completo y el plan por fases están en
+> transferencias internas, revisión de avisos y dashboard con cifras trazables. El diseño completo y el plan por fases están en
 > [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
 ---
@@ -100,7 +100,20 @@ a BD ni red, para que sean reproducibles y testeables. Las páginas solo orquest
   sustituir el adaptador en `src/server/prisma.ts` por `@prisma/adapter-pg`,
   regenerar migraciones y trasladar los datos con el backup JSON.
 
-## Uso (fase 2)
+## Dashboard
+
+Patrimonio neto (con variación del mes y del último año), liquidez, inversiones,
+ahorro y tasa de ahorro del mes, ingresos y gastos frente al mes anterior,
+mayores gastos por categoría y distribución del patrimonio. Se puede ver
+cualquier mes pasado con las flechas.
+
+- Cada tarjeta tiene **«¿De dónde sale?»** con el desglose y enlaces; cada
+  importe de ingresos/gastos/categoría abre los movimientos que lo forman.
+- Si falta un dato (una cuenta sin saldo a esa fecha, una deuda sin saldo, otra
+  moneda) la cifra se marca **incompleta** y se indica qué falta; las
+  variaciones pasan a «Pendiente de datos».
+
+## Uso (cuentas y movimientos)
 
 - **Cuentas**: crea cada cuenta con su saldo y la fecha de ese saldo (saldo al final
   de ese día). El saldo actual se calcula como saldo inicial + movimientos
@@ -200,6 +213,9 @@ npm test
 - `tests/import/`: lectura de extractos (Windows-1252 con títulos, UTF-8 con
   cargo/abono, XLSX, tarjeta con signos invertidos, XLS antiguo, HTML
   disfrazado), filas no válidas, coherencia de saldo.
+- `tests/domain/networth.test.ts` y `tests/db/dashboard.test.ts`: patrimonio
+  (activos − pasivos, tarjetas como deuda, datos pendientes), patrimonio a una
+  fecha pasada, variaciones mensual y anual, KPIs de ahorro.
 - `tests/db/categorization.test.ts`: reglas (vista previa, aplicar, nunca tocar
   lo manual, editar/borrar y recalcular), aprendizaje (sugerir tras 3
   correcciones, aceptar, descartar), categorías, transferencias automáticas al
