@@ -31,6 +31,6 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/analisis", label: "Análisis", icon: BarChart3, phase: 9 },
   { href: "/objetivos", label: "Objetivos", icon: Target, phase: 8 },
   { href: "/importar", label: "Importar", icon: Upload, phase: 3 },
-  { href: "/revision", label: "Revisión", icon: CheckCircle2, phase: 10 },
+  { href: "/revision", label: "Revisión", icon: CheckCircle2, phase: 4 },
   { href: "/configuracion", label: "Configuración", icon: Settings, phase: 4 },
 ];

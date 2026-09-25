@@ -37,7 +37,7 @@ export function NewTransactionForm({
       <Field label="Categoría" name="category">
         {categorySelect}
       </Field>
-      <KindField />
+      <KindField allowAuto />
       <Field label="Comercio (opcional)" name="merchant">
         <input id="merchant" name="merchant" className={inputClass} />
       </Field>

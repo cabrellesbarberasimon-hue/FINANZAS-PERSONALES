@@ -55,7 +55,7 @@ export default async function WelcomePage() {
                             Ir
                           </Link>
                         )}
-                        {s.key === "balances" && (
+                        {(s.key === "balances" || s.key === "categories") && (
                           <InlineActionButton action={markStepAction.bind(null, s.key)} hidden={{ op: "confirm" }}>
                             Hecho
                           </InlineActionButton>

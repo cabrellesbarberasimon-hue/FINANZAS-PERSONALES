@@ -92,7 +92,6 @@ export async function getOnboarding(db: Db, userId: string) {
       description: "Ajusta categorías y reglas automáticas a tu gusto.",
       href: "/configuracion",
       status: status("categories", false),
-      availableInPhase: 4,
     },
   ];
   const allResolved = steps.every((s) => s.status !== "pending");

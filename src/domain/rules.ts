@@ -1,5 +1,5 @@
 import type { TxKind } from "./cashflow";
-import { normalizeForHash } from "./text";
+import { merchantKey, normalizeForHash } from "./text";
 
 /**
  * Motor de reglas de categorización (docs/ARQUITECTURA.md §10). Puro:
@@ -86,7 +86,9 @@ export function ruleMatches(rule: RuleLike, tx: RuleInput): boolean {
   // Una categoría de ingresos nunca se aplica a una salida de dinero.
   const kind = rule.setKind ?? rule.categoryKind;
   if (kind === "INCOME" && tx.amount < 0) return false;
-  const text = rule.field === "MERCHANT" ? tx.merchant ?? "" : tx.description;
+  // MERCHANT = clave de comercio calculada de la descripción (determinista, la
+  // misma que usa el aprendizaje), no el campo "comercio" editable.
+  const text = rule.field === "MERCHANT" ? merchantKey(tx.description) : tx.description;
   const re = compile(rule);
   if (!re) return false;
   return re.test(rule.matchType === "REGEX" ? text : normalizeForHash(text));

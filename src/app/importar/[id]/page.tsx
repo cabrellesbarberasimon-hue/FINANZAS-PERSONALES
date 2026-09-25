@@ -86,7 +86,11 @@ export default async function ImportDetailPage({
 
   // ---------------------------------------------------------------- Importado / deshecho
   if (imp.status !== "PREVIEW") {
-    const flags = await db.reviewFlag.findMany({ where: { importId: id, status: "OPEN" } });
+    const [flags, linkedTransfers, transferFlags] = await Promise.all([
+      db.reviewFlag.findMany({ where: { importId: id, status: "OPEN" } }),
+      db.transaction.count({ where: { importId: id, transferPeerId: { not: null } } }),
+      db.reviewFlag.count({ where: { status: "OPEN", type: "POSSIBLE_TRANSFER", transaction: { importId: id } } }),
+    ]);
     const mismatch = flags.find((f) => f.type === "BALANCE_MISMATCH");
     const mismatchData = mismatch?.data ? (JSON.parse(mismatch.data) as { difference: number }) : null;
     return (
@@ -125,7 +129,19 @@ export default async function ImportDetailPage({
               </Notice>
             </div>
           )}
-          {imp.statementBalance !== null && imp.statementBalanceDate && (
+          {(linkedTransfers > 0 || transferFlags > 0) && (
+            <div className="mt-4">
+              <Notice tone="info">
+                {linkedTransfers > 0 && `${linkedTransfers} transferencia(s) interna(s) vinculadas automáticamente con tus otras cuentas. `}
+                {transferFlags > 0 && (
+                  <>
+                    {transferFlags} posible(s) transferencia(s) pendientes de confirmar en <Link className="underline" href="/revision">Revisión</Link>.
+                  </>
+                )}
+              </Notice>
+            </div>
+          )}
+                    {imp.statementBalance !== null && imp.statementBalanceDate && (
             <div className="mt-4">
               {mismatchData ? (
                 <Notice tone="warning">

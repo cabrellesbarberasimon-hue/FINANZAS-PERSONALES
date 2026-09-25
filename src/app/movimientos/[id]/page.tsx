@@ -15,6 +15,10 @@ import { db } from "@/server/db";
 import { listCategoryTree } from "@/server/services/categories";
 import { UserError } from "@/server/services/common";
 import { getTransaction, getTransferCandidates } from "@/server/services/transactions";
+import { getRuleSuggestions } from "@/server/services/rules";
+import { merchantKey } from "@/domain/text";
+import { RuleSuggestions } from "@/components/RuleSuggestions";
+import { buttonClass } from "@/components/ui/styles";
 import { deleteTransactionAction, linkTransferAction, unlinkTransferAction, updateTransactionAction } from "../actions";
 import { EditTransactionForm } from "./EditTransactionForm";
 
@@ -59,7 +63,12 @@ export default async function TransactionPage({ params }: { params: Promise<{ id
     throw e;
   }
   const { tx, audit } = data;
-  const [categories, candidates] = await Promise.all([listCategoryTree(db, userId), getTransferCandidates(db, userId, id)]);
+  const key = merchantKey(data.tx.descriptionRaw);
+  const [categories, candidates, suggestions] = await Promise.all([
+    listCategoryTree(db, userId),
+    getTransferCandidates(db, userId, id),
+    key ? getRuleSuggestions(db, userId, { merchantKey: key }) : Promise.resolve([]),
+  ]);
   const editableBankData = tx.source === "MANUAL";
 
   return (
@@ -156,8 +165,19 @@ export default async function TransactionPage({ params }: { params: Promise<{ id
         </Card>
       </div>
 
+      {suggestions.length > 0 && (
+        <div className="mt-6">
+          <RuleSuggestions suggestions={suggestions} />
+        </div>
+      )}
+
       <Card className="mt-6">
-        <h2 className="mb-4 text-base font-semibold">Editar</h2>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">Editar</h2>
+          <Link href={`/configuracion/reglas/nueva?desde=${tx.id}`} className={buttonClass("secondary")}>
+            Crear regla con este movimiento
+          </Link>
+        </div>
         <EditTransactionForm
           action={updateTransactionAction.bind(null, tx.id)}
           editableBankData={editableBankData}

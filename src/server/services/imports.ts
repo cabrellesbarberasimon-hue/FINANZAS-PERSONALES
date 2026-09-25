@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { DATE_FORMATS, formatDateES, type DateFormat } from "@/domain/dates";
 import { assignDedupHashes, classifyRows, PROBABLE_DUPLICATE_MAX_DAYS, type DedupStatus } from "@/domain/dedup";
-import { findMatchingRule, sortRules, type RuleLike } from "@/domain/rules";
+import { findMatchingRule } from "@/domain/rules";
 import { cleanDescription, merchantKey } from "@/domain/text";
 import { defaultKindForAmount } from "@/domain/transactions";
 import { balanceMethod } from "@/domain/accounts";
@@ -13,6 +13,8 @@ import { normalizeTable, openingFromStatement, type NormalizeResult } from "@/se
 import { parseStatement } from "@/server/import/parsers";
 import type { ImportConfig, NormalizedRow, RawTable } from "@/server/import/types";
 import { inTransaction, UserError, writeAudit, type Db } from "./common";
+import { loadSortedRules } from "./rules";
+import { detectTransfers } from "./transfer-detection";
 
 /**
  * Importación de extractos (docs/ARQUITECTURA.md §5). Flujo:
@@ -220,20 +222,6 @@ export interface ImportPreview {
   duplicatesOf: Map<string, { id: string; date: Date; amount: number; descriptionRaw: string }>;
 }
 
-async function loadRules(db: Db, userId: string) {
-  const rules = await db.categorizationRule.findMany({
-    where: { userId, active: true },
-    include: { category: { select: { kind: true, name: true } }, subcategory: { select: { name: true } } },
-  });
-  return sortRules(
-    rules.map((r) => ({
-      ...r,
-      categoryKind: r.category.kind,
-      label: `${r.category.name}${r.subcategory ? ` / ${r.subcategory.name}` : ""}`,
-    })) as Array<RuleLike & { label: string }>,
-  );
-}
-
 export async function buildPreview(db: Db, userId: string, id: string, today: Date): Promise<ImportPreview> {
   const imp = await getImport(db, userId, id);
   const { config } = readMapping(imp);
@@ -261,7 +249,7 @@ export async function buildPreview(db: Db, userId: string, id: string, today: Da
         })
       : [];
   const classified = classifyRows(hashed, existing);
-  const rules = await loadRules(db, userId);
+  const rules = await loadSortedRules(db, userId);
 
   const rows: PreviewRow[] = classified.map((r) => {
     const merchant = merchantKey(r.description) || null;
@@ -347,6 +335,8 @@ export interface CommitResult {
   duplicate: number;
   skipped: number;
   balanceDifference: number | null;
+  transfersLinked: number;
+  transfersFlagged: number;
 }
 
 export async function commitImport(
@@ -382,6 +372,7 @@ export async function commitImport(
 
     let inserted = 0;
     let flagged = 0;
+    const insertedIds: string[] = [];
     let duplicate = 0;
     let skipped = normalized.invalid.length;
     const ruleUse = new Map<string, number>();
@@ -422,6 +413,7 @@ export async function commitImport(
         },
       });
       inserted++;
+      insertedIds.push(created.id);
       if (r.ruleId) ruleUse.set(r.ruleId, (ruleUse.get(r.ruleId) ?? 0) + 1);
       if (r.dedup.status === "PROBABLE_DUPLICATE") {
         flagged++;
@@ -446,6 +438,9 @@ export async function commitImport(
     for (const [ruleId, n] of ruleUse) {
       await tx.categorizationRule.update({ where: { id: ruleId }, data: { timesApplied: { increment: n } } });
     }
+
+    // Transferencias internas con otras cuentas propias (vincula o avisa).
+    const transfers = insertedIds.length ? await detectTransfers(tx, userId, { onlyIds: insertedIds }) : { linked: 0, flagged: 0 };
 
     // Saldo final del extracto como saldo declarado (nunca sobrescribe uno existente).
     let balanceDifference: number | null = null;
@@ -522,10 +517,10 @@ export async function commitImport(
       entity: "Import",
       entityId: imp.id,
       action: "create",
-      after: { fileName: imp.fileName, inserted, flagged, duplicate, skipped },
+      after: { fileName: imp.fileName, inserted, flagged, duplicate, skipped, transfers },
     });
 
-    return { inserted, flagged, duplicate, skipped, balanceDifference };
+    return { inserted, flagged, duplicate, skipped, balanceDifference, transfersLinked: transfers.linked, transfersFlagged: transfers.flagged };
   });
 }
 
@@ -597,4 +592,18 @@ export async function reopenMapping(db: Db, userId: string, id: string) {
     where: { id },
     data: { mapping: JSON.stringify({ ...mapping, config: { ...mapping.config, confirmed: false } } satisfies StoredMapping) },
   });
+}
+
+export async function listImportProfiles(db: Db, userId: string) {
+  return db.importProfile.findMany({
+    where: { userId },
+    orderBy: { name: "asc" },
+    include: { account: { select: { name: true } }, _count: { select: { imports: true } } },
+  });
+}
+
+/** Borrar un perfil no afecta a importaciones pasadas (guardan su propio mapeo). */
+export async function deleteImportProfile(db: Db, userId: string, id: string) {
+  const r = await db.importProfile.deleteMany({ where: { id, userId } });
+  if (r.count === 0) throw new UserError("El formato no existe.");
 }

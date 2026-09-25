@@ -21,10 +21,11 @@ export function AmountFields({ defaultAmount, defaultDirection = "out" }: { defa
   );
 }
 
-export function KindField({ defaultKind }: { defaultKind?: TxKind }) {
+export function KindField({ defaultKind, allowAuto = false }: { defaultKind?: TxKind; allowAuto?: boolean }) {
   return (
     <Field label="Tipo (si no eliges categoría)" name="kind" hint="Con categoría, el tipo lo marca la categoría.">
-      <select id="kind" name="kind" defaultValue={defaultKind ?? "EXPENSE"} className={inputClass}>
+      <select id="kind" name="kind" defaultValue={defaultKind ?? (allowAuto ? "" : "EXPENSE")} className={inputClass}>
+        {allowAuto && <option value="">Automático (reglas o signo del importe)</option>}
         {TX_KINDS.map((k) => (
           <option key={k} value={k}>
             {TX_KIND_LABELS[k]}

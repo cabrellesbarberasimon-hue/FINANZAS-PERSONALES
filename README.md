@@ -8,10 +8,12 @@ patrimonio, presupuestos y objetivos.
 corregir → automatización → simplicidad. Nunca se inventan datos: si falta
 información se muestra **"Pendiente de datos"**.
 
-> Estado: **Fases 1, 2 y 3 completadas**: arquitectura, base de datos, cuentas
+> Estado: **Fases 1 a 4 completadas**: arquitectura, base de datos, cuentas
 > (saldos, conciliación, deudas), movimientos (filtros, alta manual, edición
 > con historial, transferencias internas), asistente inicial e importación de
-> extractos CSV/XLSX con anti-duplicados y conciliación. El diseño completo y el plan por fases están en
+> extractos CSV/XLSX con anti-duplicados y conciliación, categorización
+> automática con reglas que aprenden de tus correcciones, detección de
+> transferencias internas y revisión de avisos. El diseño completo y el plan por fases están en
 > [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
 ---
@@ -163,15 +165,28 @@ importan marcados para revisión, nunca en silencio.
    `src/server/import/parsers/` y añádela a `PARSERS` en `parsers/index.ts`.
 3. Añade un extracto de ejemplo **anonimizado** en `tests/fixtures/` y un test.
 
-## Categorías
+## Categorías y reglas
 
-- Las categorías iniciales están en [`prisma/seed-data/categories.ts`](prisma/seed-data/categories.ts)
-  y las reglas iniciales ("MERCADONA → Alimentación / Supermercado"…) en
-  [`prisma/seed-data/rules.ts`](prisma/seed-data/rules.ts).
-- **Para tu instalación**: crea categorías, subcategorías y reglas desde
-  Configuración (fase 4). El seed es idempotente y nunca borra ni renombra lo tuyo.
-- **Para instalaciones nuevas**: añade entradas a esos ficheros y ejecuta
-  `npm run db:seed`. Las categorías que falten se crean; las existentes no se tocan.
+- **Tus categorías**: Configuración › Categorías. Crear, renombrar, añadir
+  subcategorías, archivar. Las que tienen movimientos, reglas o presupuestos no
+  se borran (se archivan) para no perder historial. El tipo (gasto, ingreso,
+  transferencia, inversión) decide cómo cuentan sus movimientos.
+- **Reglas**: Configuración › Reglas, o «Crear regla con este movimiento» desde
+  cualquier movimiento. El botón «Probar» muestra a cuántos movimientos afectaría
+  antes de guardar. Nunca modifican lo que categorizaste a mano.
+- **Aprendizaje**: si corriges 3 veces el mismo comercio a la misma categoría, la
+  app te propone crear la regla.
+- **Para instalaciones nuevas**: las categorías y reglas iniciales están en
+  [`prisma/seed-data/categories.ts`](prisma/seed-data/categories.ts) y
+  [`prisma/seed-data/rules.ts`](prisma/seed-data/rules.ts). `npm run db:seed` crea
+  las que falten sin tocar las existentes.
+
+## Revisión
+
+La página Revisión reúne lo que necesita atención: movimientos sin categoría,
+posibles duplicados (eliminar el nuevo o marcar «no es duplicado»), posibles
+transferencias internas (vincular o descartar) y descuadres de saldo. Los
+avisos no se borran: se resuelven o descartan dejando constancia.
 
 ## Tests
 
@@ -185,6 +200,10 @@ npm test
 - `tests/import/`: lectura de extractos (Windows-1252 con títulos, UTF-8 con
   cargo/abono, XLSX, tarjeta con signos invertidos, XLS antiguo, HTML
   disfrazado), filas no válidas, coherencia de saldo.
+- `tests/db/categorization.test.ts`: reglas (vista previa, aplicar, nunca tocar
+  lo manual, editar/borrar y recalcular), aprendizaje (sugerir tras 3
+  correcciones, aceptar, descartar), categorías, transferencias automáticas al
+  importar y resolución de avisos.
 - `tests/db/imports.test.ts`: flujo completo — reimportar sin duplicar,
   extractos solapados, duplicados probables, exclusión de filas, deshacer,
   ajuste de saldo inicial, perfiles por banco.

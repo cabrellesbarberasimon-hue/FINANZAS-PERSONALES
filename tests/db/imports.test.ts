@@ -69,7 +69,7 @@ describe("importación completa", () => {
     const acc = await account();
     const { id } = await upload(acc.id);
     const r = await commit(id);
-    expect(r).toEqual({ inserted: 6, flagged: 0, duplicate: 0, skipped: 1, balanceDifference: 0 });
+    expect(r).toMatchObject({ inserted: 6, flagged: 0, duplicate: 0, skipped: 1, balanceDifference: 0 });
     const txs = await db.transaction.findMany({ where: { importId: id } });
     expect(txs.every((t) => t.source === "IMPORT" && t.importRowIndex !== null)).toBe(true);
     const detail = await getAccountDetail(db, userId, acc.id);

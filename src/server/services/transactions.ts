@@ -6,7 +6,9 @@ import { cleanDescription, merchantKey } from "@/domain/text";
 import { canLinkTransfer, findTransferCandidates, TRANSFER_MAX_DAYS } from "@/domain/transfers";
 import { checkKindAmount, defaultKindForAmount, TX_KINDS } from "@/domain/transactions";
 import type { Prisma, Transaction } from "@/generated/prisma/client";
+import { findMatchingRule } from "@/domain/rules";
 import { inTransaction, isUniqueViolation, UserError, writeAudit, type Db } from "./common";
+import { loadSortedRules } from "./rules";
 
 // -----------------------------------------------------------------------------
 // Filtros y listado
@@ -246,6 +248,17 @@ export async function createManualTransaction(
   const check = checkKindAmount(cat.kind, data.amount);
   if (!check.ok) throw new UserError(check.reason, { amount: check.reason });
 
+  // Sin categoría elegida (y sin tipo forzado): se prueban las reglas automáticas.
+  let rule: { id: string; categoryId: string; subcategoryId: string | null; kind: TxKind } | null = null;
+  if (!cat.categoryId && !data.kind) {
+    const match = findMatchingRule(await loadSortedRules(db, userId), {
+      accountId: account.id, amount: data.amount, description: data.description, merchant: data.merchant,
+    });
+    if (match && checkKindAmount(match.setKind ?? match.categoryKind, data.amount).ok) {
+      rule = { id: match.id, categoryId: match.categoryId, subcategoryId: match.subcategoryId, kind: match.setKind ?? match.categoryKind };
+    }
+  }
+
   return inTransaction(db, async (tx) => {
     const fields = { date: data.date, amount: data.amount, description: data.description };
     const { occurrence, dedupHash, duplicates } = await nextOccurrenceHash(tx, account.id, fields);
@@ -267,10 +280,11 @@ export async function createManualTransaction(
         descriptionClean: cleanDescription(data.description),
         merchant: data.merchant ?? (merchantKey(data.description) || null),
         notes: data.notes,
-        kind: cat.kind,
-        categoryId: cat.categoryId,
-        subcategoryId: cat.subcategoryId,
-        categorizationSource: cat.categoryId ? "MANUAL" : "NONE",
+        kind: rule?.kind ?? cat.kind,
+        categoryId: rule?.categoryId ?? cat.categoryId,
+        subcategoryId: rule ? rule.subcategoryId : cat.subcategoryId,
+        categorizationSource: cat.categoryId ? "MANUAL" : rule ? "RULE" : "NONE",
+        ruleId: rule?.id ?? null,
         isExtraordinary: data.isExtraordinary,
         dedupHash,
         occurrence,
@@ -431,6 +445,16 @@ export async function linkTransfer(db: Db, userId: string, aId: string, bId: str
     const b2 = await tx.transaction.update({ where: { id: b.id }, data: { ...common, transferPeerId: a.id } });
     await writeAudit(tx, { userId, entity: "Transaction", entityId: a.id, action: "link", before: a, after: a2 });
     await writeAudit(tx, { userId, entity: "Transaction", entityId: b.id, action: "link", before: b, after: b2 });
+    // Los avisos "¿transferencia interna?" de ambos quedan resueltos.
+    await tx.reviewFlag.updateMany({
+      where: {
+        userId,
+        status: "OPEN",
+        type: "POSSIBLE_TRANSFER",
+        OR: [{ transactionId: { in: [a.id, b.id] } }, { relatedTransactionId: { in: [a.id, b.id] } }],
+      },
+      data: { status: "RESOLVED", resolution: "Vinculada como transferencia interna", resolvedAt: new Date() },
+    });
   });
 }
 

@@ -42,3 +42,62 @@ export function findTransferCandidates<T extends TransferSide>(tx: TransferSide,
       (x, y) => Math.abs(daysBetween(tx.date, x.date)) - Math.abs(daysBetween(tx.date, y.date)),
     );
 }
+
+/** Palabras que indican un movimiento entre cuentas propias (descripción normalizada). */
+export const TRANSFER_KEYWORDS = [
+  "TRASPASO",
+  "TRASP",
+  "TRANSFERENCIA",
+  "TRANSF",
+  "LIQUIDACION TARJETA",
+  "PAGO TARJETA",
+  "RETIRADA CAJERO",
+  "RETIRADA EFECTIVO",
+  "INGRESO EFECTIVO",
+  "APORTACION",
+  "ENVIO A",
+  "INGRESO DESDE",
+];
+
+export function hasTransferKeyword(description: string): boolean {
+  const d = description.toUpperCase();
+  return TRANSFER_KEYWORDS.some((k) => new RegExp(`(^|[^A-Z])${k}($|[^A-Z])`).test(d));
+}
+
+export type TransferDecision<T> =
+  | { tx: T; action: "LINK"; peer: T }
+  | { tx: T; action: "FLAG"; candidates: T[] };
+
+/**
+ * Decide qué hacer con cada movimiento nuevo sin pareja:
+ * - LINK: tiene UNA sola candidata, esa candidata solo le tiene a él como
+ *   candidato, y alguna de las dos descripciones indica transferencia.
+ * - FLAG: tiene candidatas pero la señal no es suficiente -> revisión manual.
+ * Nunca se enlaza por mera coincidencia de importe.
+ */
+export function decideTransfers<T extends TransferSide & { description: string }>(
+  targets: T[],
+  pool: T[],
+): Array<TransferDecision<T>> {
+  const decisions: Array<TransferDecision<T>> = [];
+  const used = new Set<string>();
+  // Universo de posibles parejas: los propios movimientos nuevos también cuentan
+  // (p.ej. extractos de dos cuentas importados a la vez).
+  const all = [...new Map([...pool, ...targets].map((t) => [t.id, t])).values()];
+  for (const tx of targets) {
+    if (tx.transferPeerId || used.has(tx.id)) continue;
+    const candidates = findTransferCandidates(tx, all).filter((c) => !used.has(c.id));
+    if (candidates.length === 0) continue;
+    const only = candidates.length === 1 ? candidates[0]! : null;
+    const mutual = only && findTransferCandidates(only, all).filter((c) => !used.has(c.id)).length === 1;
+    const keyword = only && (hasTransferKeyword(tx.description) || hasTransferKeyword(only.description));
+    if (only && mutual && keyword) {
+      decisions.push({ tx, action: "LINK", peer: only });
+      used.add(tx.id);
+      used.add(only.id);
+    } else {
+      decisions.push({ tx, action: "FLAG", candidates });
+    }
+  }
+  return decisions;
+}

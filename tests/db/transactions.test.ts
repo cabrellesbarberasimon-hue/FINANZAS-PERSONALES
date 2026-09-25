@@ -59,9 +59,19 @@ describe("alta manual", () => {
   });
 });
 
+describe("reglas en el alta manual", () => {
+  it("sin categoría ni tipo, se aplican las reglas automáticas", async () => {
+    const t = await createManualTransaction(db, userId, tx({ description: "REPSOL E.S. 22", date: utcDate(2026, 3, 9) }));
+    expect(t.categorizationSource).toBe("RULE");
+    expect(t.ruleId).not.toBeNull();
+    const cat = await db.category.findUniqueOrThrow({ where: { id: t.categoryId! } });
+    expect(cat.name).toBe("Transporte");
+  });
+});
+
 describe("edición", () => {
   it("corregir la categoría registra la corrección para el aprendizaje y la auditoría", async () => {
-    const t = await createManualTransaction(db, userId, tx({ description: "COMPRA TARJ. 1234XXXX5678 MERCADONA ALZIRA", date: utcDate(2026, 3, 5) }));
+    const t = await createManualTransaction(db, userId, tx({ description: "COMPRA TARJ. 1234XXXX5678 MERCADONA ALZIRA", date: utcDate(2026, 3, 5), kind: "EXPENSE" }));
     await updateTransaction(db, userId, t.id, { descriptionClean: "MERCADONA ALZIRA", ...superCat });
     const corr = await db.categorizationCorrection.findMany({ where: { transactionId: t.id } });
     expect(corr).toHaveLength(1);

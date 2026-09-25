@@ -58,6 +58,12 @@ describe("reglas de categorización", () => {
     expect(findMatchingRule([rule({ pattern: "EXACTO", matchType: "EQUALS" })], tx("EXACTO 2"))).toBeNull();
   });
 
+  it("campo MERCHANT compara con la clave de comercio", () => {
+    const r = [rule({ pattern: "BAR ESQUINA", field: "MERCHANT", matchType: "EQUALS" })];
+    expect(findMatchingRule(r, tx("COMPRA TARJ. 1234XXXX5678 BAR LA ESQUINA 12"))).not.toBeNull();
+    expect(findMatchingRule(r, tx("BAR LA ESQUINITA"))).toBeNull();
+  });
+
   it("valida patrones", () => {
     expect(isValidRulePattern("REGEX", "(")).toBe(false);
     expect(isValidRulePattern("CONTAINS", "   ")).toBe(false);

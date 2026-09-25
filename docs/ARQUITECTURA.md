@@ -466,22 +466,42 @@ foto cerrada en lugar de reescribirla en silencio.
 
 ## 10. Categorización y aprendizaje
 
-Orden de aplicación al importar (primera que coincide):
-1. Reglas del usuario (`USER`, `LEARNED`) por `priority` desc y patrón más largo.
-2. Reglas del sistema (`SYSTEM`).
-3. Sin categoría → aparece en Revisión.
+Motor puro en [`src/domain/rules.ts`](../src/domain/rules.ts); servicio en
+`src/server/services/rules.ts`.
 
-Las reglas trabajan sobre la descripción normalizada. Nunca se re-categoriza un
-movimiento con `categorizationSource = MANUAL`.
+**Coincidencia**. Las reglas comparan contra:
+- `DESCRIPTION`: la descripción del banco normalizada (mayúsculas, sin acentos).
+  `CONTAINS` busca **palabras completas** («DIA» no coincide con «MEDIA»).
+- `MERCHANT`: la **clave de comercio** calculada de la descripción
+  (`merchantKey`: sin prefijos de tarjeta, números ni palabras vacías;
+  «COMPRA TARJ. 1234XXXX BAR LA ESQUINA 12» → «BAR ESQUINA»).
+Una categoría de ingresos nunca se aplica a una salida de dinero.
 
-**Aprendizaje**: cada corrección manual guarda `CategorizationCorrection
-(merchantKey → categoría)`. Si una misma `merchantKey` (p.ej. `MERCADONA`) se
-corrige **3 veces** a la misma categoría sin regla que lo cubra, se sugiere:
-"¿Crear regla MERCADONA → Alimentación / Supermercado y aplicarla a 12
-movimientos sin categoría?". Aceptar crea una regla `LEARNED`; rechazar marca las
-correcciones como `dismissed` para no insistir.
+**Precedencia** (primera que coincide): reglas del usuario (`USER`, `LEARNED`) >
+prioridad > patrón más largo > reglas del sistema. Sin coincidencia → sin
+categoría → aparece en Revisión.
 
----
+**Cuándo se aplican**: al importar (vista previa), al crear un movimiento
+manual sin categoría ni tipo, y bajo demanda («Aplicar a los sin categoría» o
+«Recalcular todos los automáticos»). **Nunca** se re-categoriza un movimiento
+con `categorizationSource = MANUAL` ni una transferencia vinculada. Borrar una
+regla no descategoriza nada hasta que se recalcula.
+
+**Aprendizaje** ([`src/domain/learning.ts`](../src/domain/learning.ts)): cada
+corrección manual guarda `CategorizationCorrection (merchantKey → categoría)`.
+Con **3 correcciones** iguales, sin una regla del usuario que ya lo resuelva, se
+sugiere «Has clasificado X como Y 3 veces. ¿Crear regla?» en el propio
+movimiento y en Configuración › Reglas. Si hay correcciones contradictorias,
+gana la categoría más repetida. Aceptar crea una regla `LEARNED`
+(`MERCHANT` = clave) y la aplica a los sin categoría; rechazar marca las
+correcciones como descartadas y no se vuelve a sugerir.
+
+**Transferencias internas** ([`decideTransfers`](../src/domain/transfers.ts)):
+tras cada importación se buscan parejas (otra cuenta propia, importe opuesto
+exacto, ±5 días). Se vinculan solas **solo** si la pareja es única, mutua y
+alguna descripción contiene una palabra clave (TRASPASO, TRANSFERENCIA,
+LIQUIDACION TARJETA, RETIRADA CAJERO…). En el resto de casos se crea un aviso
+`POSSIBLE_TRANSFER` en Revisión. Al vincular a mano, el aviso se resuelve solo.
 
 ## 11. Seguridad, backup y datos demo
 
@@ -541,7 +561,7 @@ correcciones como `dismissed` para no insistir.
 | **1** ✅ | Arquitectura, esquema, migración inicial, seed de categorías/reglas, dominio base (dinero, fechas, texto, hash anti-duplicados, ahorro), layout y navegación, modo demo aislado, README | Tests de dominio y de integridad de BD en verde; build OK |
 | **2** ✅ | Cuentas (CRUD, saldo inicial, saldos declarados, pasivos), movimientos (tabla, filtros, edición con AuditLog, alta manual, vincular transferencias), asistente inicial, datos demo | Saldo calculado correcto; editar deja traza |
 | **3** ✅ | Importación CSV/XLSX: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
-| **4** | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
+| **4** ✅ | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
 | **5** | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |
 | **6** | Inversiones: aportaciones, VL, posición, rentabilidad simple, TIR, dashboard de inversiones | Tests de aportaciones vs. rentabilidad |
 | **7** | Patrimonio: activos − pasivos, histórico mensual, snapshots, puente mensual | Puente cuadra o muestra la diferencia |
