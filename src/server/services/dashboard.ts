@@ -2,6 +2,7 @@ import { summarizeCashflow, type CashflowSummary } from "@/domain/cashflow";
 import { addMonths, monthKey, monthRange, utcDate } from "@/domain/dates";
 import { compareNetWorth, type Change } from "@/domain/networth";
 import type { Db } from "./common";
+import { getPortfolio, type Portfolio } from "./investments";
 import { netWorthAt, type NetWorthSnapshotView } from "./networth";
 
 /** Último día del mes "YYYY-MM". */
@@ -30,7 +31,8 @@ export interface Dashboard {
   cashflow: CashflowSummary;
   previousCashflow: CashflowSummary;
   topExpenses: CategoryTotal[];
-  review: { uncategorized: number; openFlags: number };
+  review: { uncategorized: number; openFlags: number; staleInvestments: number };
+  portfolio: Portfolio;
   hasData: boolean;
 }
 
@@ -48,7 +50,7 @@ export async function getDashboard(db: Db, userId: string, month: string, today:
   const prevEnd = monthEnd(addMonths(month, -1));
   const yearAgoDate = utcDate(date.getUTCFullYear() - 1, date.getUTCMonth() + 1, date.getUTCDate());
 
-  const [netWorth, previousMonthEnd, yearAgo, txs, prevTxs, categories, uncategorized, openFlags, accounts] = await Promise.all([
+  const [netWorth, previousMonthEnd, yearAgo, txs, prevTxs, categories, uncategorized, openFlags, accounts, portfolio] = await Promise.all([
     netWorthAt(db, userId, date),
     netWorthAt(db, userId, prevEnd),
     netWorthAt(db, userId, yearAgoDate),
@@ -58,6 +60,7 @@ export async function getDashboard(db: Db, userId: string, month: string, today:
     db.transaction.count({ where: { userId, categoryId: null } }),
     db.reviewFlag.count({ where: { userId, status: "OPEN" } }),
     db.account.count({ where: { userId } }),
+    getPortfolio(db, userId, date),
   ]);
 
   // Gasto por categoría (neto de reembolsos), solo movimientos de tipo gasto.
@@ -90,7 +93,8 @@ export async function getDashboard(db: Db, userId: string, month: string, today:
     cashflow: summarizeCashflow(txs),
     previousCashflow: summarizeCashflow(prevTxs),
     topExpenses,
-    review: { uncategorized, openFlags },
+    review: { uncategorized, openFlags, staleInvestments: portfolio.stale.length },
+    portfolio,
     hasData: accounts > 0,
   };
 }

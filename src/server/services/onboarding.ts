@@ -75,9 +75,8 @@ export async function getOnboarding(db: Db, userId: string) {
       key: "investments",
       title: "Registrar inversiones existentes",
       description: "Fondos indexados, ETF, planes de pensiones…",
-      href: "/inversiones",
+      href: "/inversiones/nueva",
       status: status("investments", investments > 0),
-      availableInPhase: 6,
     },
     {
       key: "import",

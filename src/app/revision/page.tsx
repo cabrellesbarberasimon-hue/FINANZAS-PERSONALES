@@ -10,6 +10,8 @@ import { formatMoney } from "@/domain/money";
 import { getCurrentUserId } from "@/server/auth/current-user";
 import { db } from "@/server/db";
 import { getReviewSummary, listOpenFlags } from "@/server/services/review";
+import { getPortfolio } from "@/server/services/investments";
+import { today } from "@/domain/dates";
 import { confirmDuplicateAction, linkFromFlagAction, resolveFlagAction } from "./actions";
 
 export const metadata: Metadata = { title: "Revisar datos" };
@@ -62,7 +64,9 @@ const dismiss = (id: string, label: string, resolution: string) => (
 
 export default async function ReviewPage() {
   const userId = await getCurrentUserId();
-  const [summary, flags] = await Promise.all([getReviewSummary(db, userId), listOpenFlags(db, userId)]);
+  const [summary, flags, portfolio] = await Promise.all([getReviewSummary(db, userId), listOpenFlags(db, userId), getPortfolio(db, userId, today())]);
+  const stale = portfolio.stale;
+  const unvalued = portfolio.rows.filter((r) => r.position && r.position.transactionIds.length > 0 && r.position.value === null);
   const of = (t: Flag["type"]) => flags.filter((f) => f.type === t);
   const duplicates = of("POSSIBLE_DUPLICATE");
   const transfers = of("POSSIBLE_TRANSFER");
@@ -72,15 +76,16 @@ export default async function ReviewPage() {
   return (
     <>
       <PageHeader title="Revisar datos" description="Lo que necesita tu atención para que las cifras sean fiables." />
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
         <Stat label="Sin categoría" value={summary.uncategorized} href="/movimientos?categoria=none%7C" tone="warning" />
         <Stat label="Posibles duplicados" value={duplicates.length} tone="warning" />
         <Stat label="¿Transferencias?" value={transfers.length} tone="warning" />
         <Stat label="Descuadres de saldo" value={mismatches.length} tone="warning" />
+        <Stat label="Inversiones sin actualizar" value={stale.length + unvalued.length} href="/inversiones" tone="warning" />
         <Stat label="Sin revisar" value={summary.unreviewed} href="/movimientos?revisado=no" />
       </div>
 
-      {flags.length === 0 && summary.uncategorized === 0 && (
+      {flags.length === 0 && summary.uncategorized === 0 && stale.length + unvalued.length === 0 && (
         <Card className="mt-6">
           <p className="text-sm text-positive">Todo en orden: no hay avisos pendientes.</p>
         </Card>
@@ -150,6 +155,24 @@ export default async function ReviewPage() {
           })}
         </Section>
 
+        <Section title="Inversiones sin actualizar" count={stale.length + unvalued.length}>
+          {[...unvalued, ...stale].map((r) => (
+            <li key={r.inv.id} className="flex flex-wrap items-center justify-between gap-2 py-3 text-sm">
+              <span>
+                <Link href={`/inversiones/${r.inv.id}`} className="font-medium hover:underline">
+                  {r.inv.name}
+                </Link>{" "}
+                <span className="text-muted">
+                  {r.position?.valuation ? `· última valoración ${formatDateES(r.position.valuation.date)}` : "· sin ninguna valoración"}
+                </span>
+              </span>
+              <Link href={`/inversiones/${r.inv.id}`} className="text-info hover:underline">
+                Añadir valor liquidativo
+              </Link>
+            </li>
+          ))}
+        </Section>
+
         <Section title="Otros avisos" count={others.length}>
           {others.map((f) => (
             <li key={f.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
@@ -159,7 +182,7 @@ export default async function ReviewPage() {
           ))}
         </Section>
       </div>
-      <p className="mt-6 text-xs text-muted">La revisión completa (inversiones sin actualizar, operaciones dudosas…) se amplía en la fase 10.</p>
+      <p className="mt-6 text-xs text-muted">La revisión completa (operaciones dudosas, importes atípicos…) se amplía en la fase 10.</p>
     </>
   );
 }

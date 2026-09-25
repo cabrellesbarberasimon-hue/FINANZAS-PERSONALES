@@ -1,7 +1,9 @@
 import { balanceMethod, latestDeclared } from "@/domain/accounts";
 import { formatDateES } from "@/domain/dates";
 import { accountGroup, computeNetWorth, type AssetItem, type LiabilityItem, type NetWorth } from "@/domain/networth";
+import { computePosition, InvestmentDataError } from "@/domain/investments";
 import type { Db } from "./common";
+import { distributionGroupFor, toInvPrice, toInvTx } from "./investments";
 
 /**
  * Patrimonio a una fecha (al FINAL de ese día), calculado siempre desde los
@@ -29,7 +31,7 @@ export async function netWorthAt(db: Db, userId: string, date: Date): Promise<Ne
       where: { userId },
       include: { balances: { where: { date: { lte: date } }, orderBy: { date: "desc" }, take: 1 } },
     }),
-    db.investment.findMany({ where: { userId, archived: false }, select: { id: true, name: true, currency: true } }),
+    db.investment.findMany({ where: { userId, archived: false }, include: { transactions: true, prices: true } }),
   ]);
 
   const items: AssetItem[] = [];
@@ -55,13 +57,25 @@ export async function netWorthAt(db: Db, userId: string, date: Date): Promise<Ne
     items.push({ ...base, value: a.openingBalance + (agg._sum.amount ?? 0), asOf: date });
   }
 
-  // Inversiones detalladas: su valoración llega en la fase 6. Hasta entonces se
-  // muestran como pendientes en lugar de suponer un valor.
+  // Inversiones: valor de mercado de la posición a esa fecha (último VL en o antes).
   for (const inv of investments) {
-    items.push({
-      id: inv.id, name: inv.name, kind: "investment", group: "INVESTMENT_OTHER", bucket: "INVESTMENTS",
-      currency: inv.currency, value: null, pendingReason: "Valoración de inversiones disponible en la fase 6.",
-    });
+    const base = {
+      id: inv.id, name: inv.name, kind: "investment" as const, group: distributionGroupFor(inv.assetType),
+      bucket: "INVESTMENTS" as const, currency: inv.currency,
+    };
+    try {
+      const pos = computePosition(inv.transactions.map(toInvTx), inv.prices.map(toInvPrice), inv.valuationMode, date);
+      if (pos.transactionIds.length === 0) continue; // aún no existía
+      items.push({
+        ...base,
+        value: pos.value,
+        asOf: pos.valuation?.date ?? null,
+        pendingReason: pos.value === null ? "Sin valor liquidativo ni valoración registrada a esta fecha." : undefined,
+      });
+    } catch (e) {
+      if (!(e instanceof InvestmentDataError)) throw e;
+      items.push({ ...base, value: null, pendingReason: `Operaciones incoherentes: ${e.message}` });
+    }
   }
 
   const liabilityItems: LiabilityItem[] = [];

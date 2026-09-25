@@ -379,7 +379,7 @@ propia** con importe opuesto exacto y fecha a ±3 días.
 
 ## 8. Cálculo de inversiones
 
-Todo en `src/domain/investments.ts` (fase 6), puro y testeado.
+Todo en [`src/domain/investments.ts`](../src/domain/investments.ts), puro y testeado (`tests/domain/investments.test.ts`, `tests/db/investments.test.ts`).
 
 **Entradas**: `InvestmentTransaction[]` (BUY/SELL/DIVIDEND/FEE) + `InvestmentPrice[]`.
 
@@ -424,6 +424,26 @@ la fecha de cada aportación. Si falta alguno → "Pendiente de datos".
 **Datos que faltan**: sin ningún VL → valor actual "Pendiente de datos" (nunca se
 asume el precio de compra). VL con más de N días (configurable, 35 por defecto) →
 `ReviewFlag STALE_INVESTMENT` y aviso junto a la cifra.
+
+**Implementación (fase 6) — decisiones concretas**:
+- Participaciones y precios con `decimal.js` (exactos); importes en céntimos.
+- Una compra se registra con importe + participaciones o precio (el tercero se
+  deduce; si vienen los tres y no cuadran, error).
+- Valoración = último VL registrado **o** precio de la última compra/venta, el
+  más reciente de los dos (ambos son datos reales de mercado). Modo
+  `TOTAL_VALUE` (PIAS, planes): solo el último valor total introducido.
+- Comisiones sueltas (`FEE`) cuentan como capital aportado (dinero que pones y
+  no compra valor) → reducen la ganancia. Los dividendos cuentan como retirado.
+- Vincular una operación con su cargo/abono bancario (importe exacto) marca ese
+  movimiento como `INVESTMENT`: deja de contar como gasto/ingreso y queda la
+  traza banco ↔ fondo. Borrar la operación lo desvincula.
+- No se puede registrar una venta de más participaciones de las que hay.
+- TIR con menos de un año de historia: se muestra atenuada con aviso «<1a».
+- Inversiones sin valoración de más de 35 días: aviso en Cartera, Dashboard y Revisión (calculado, no persistido).
+- Evolución mensual: si en un mes alguna inversión no tiene valoración, el valor
+  de la cartera ese mes queda pendiente (hueco en el gráfico), nunca estimado.
+- Cuentas de tipo «Inversión (valor manual)» e inversiones detalladas se suman
+  ambas al patrimonio: usa una u otra para los mismos activos, no las dos.
 
 **Valor en una fecha pasada** (para patrimonio histórico): participaciones a esa
 fecha × último VL **en o antes** de esa fecha. Si no hay VL anterior → pendiente.
@@ -575,7 +595,7 @@ LIQUIDACION TARJETA, RETIRADA CAJERO…). En el resto de casos se crea un aviso
 | **3** ✅ | Importación CSV/XLSX: parsers, cabecera, mapeo, perfiles, vista previa, anti-duplicados, conciliación, deshacer importación | Reimportar el mismo extracto = 0 nuevas; fixtures de varios bancos |
 | **4** ✅ | Motor de reglas, gestión de categorías/reglas, aprendizaje por correcciones, detección de transferencias | Sugerencia tras 3 correcciones |
 | **5** ✅ | Dashboard con KPIs trazables (clic → operaciones) | Cada KPI enlaza a sus movimientos |
-| **6** | Inversiones: aportaciones, VL, posición, rentabilidad simple, TIR, dashboard de inversiones | Tests de aportaciones vs. rentabilidad |
+| **6** ✅ | Inversiones: aportaciones, VL, posición, rentabilidad simple, TIR, dashboard de inversiones | Tests de aportaciones vs. rentabilidad |
 | **7** | Patrimonio: activos − pasivos, histórico mensual, snapshots, puente mensual | Puente cuadra o muestra la diferencia |
 | **8** | Presupuestos y objetivos | |
 | **9** | Análisis mensual, comparaciones, recurrentes, ingresos recurrentes vs. extraordinarios, alertas | |

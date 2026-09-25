@@ -7,9 +7,10 @@ import { Card } from "@/components/ui/Card";
 import { Money } from "@/components/ui/Money";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PendingData } from "@/components/ui/PendingData";
+import { Gain } from "@/components/ui/Gain";
 import { buttonClass } from "@/components/ui/styles";
 import { addMonths, formatDateES, monthKey, monthLabel, today } from "@/domain/dates";
-import { formatMoney, formatPercent } from "@/domain/money";
+import { formatMoney, formatPercent, percentage } from "@/domain/money";
 import { DISTRIBUTION_LABELS } from "@/domain/networth";
 import { movementHref } from "@/lib/transaction-filters";
 import { getCurrentUserId } from "@/server/auth/current-user";
@@ -52,6 +53,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const pendingNames = nw.pending.map((p) => p.name).join(", ");
   const liquidityItems = nw.items.filter((i) => i.bucket === "LIQUIDITY");
   const investmentItems = nw.items.filter((i) => i.bucket === "INVESTMENTS");
+  const investedShare = nw.complete && nw.netWorth > 0 && nw.investments > 0 ? percentage(nw.investments, nw.netWorth) : null;
 
   return (
     <>
@@ -77,12 +79,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </Card>
       )}
 
-      {(d.review.uncategorized > 0 || d.review.openFlags > 0) && (
+      {(d.review.uncategorized > 0 || d.review.openFlags > 0 || d.review.staleInvestments > 0) && (
         <Link href="/revision" className="mb-6 flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-sm text-warning hover:bg-warning/10">
           <AlertTriangle className="size-4 shrink-0" aria-hidden />
           <span>
             {d.review.uncategorized > 0 && `${d.review.uncategorized} movimiento(s) sin categoría. `}
             {d.review.openFlags > 0 && `${d.review.openFlags} aviso(s) por revisar. `}
+            {d.review.staleInvestments > 0 && `${d.review.staleInvestments} inversión(es) sin valorar hace más de 35 días. `}
             Las cifras son más fiables cuando están resueltos.
           </span>
         </Link>
@@ -158,18 +161,38 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <BreakdownRow
                   key={i.id}
                   label={i.name}
-                  href={i.kind === "account" ? `/cuentas/${i.id}` : "/inversiones"}
+                  href={i.kind === "account" ? `/cuentas/${i.id}` : `/inversiones/${i.id}`}
                   value={i.value === null ? <span className="text-warning">pendiente</span> : formatMoney(i.value)}
                 />
               ))}
-              <p className="text-xs text-muted">
-                Capital aportado, ganancia y rentabilidad llegan con el módulo de inversiones (fase 6). Hasta entonces solo se muestran cuentas de inversión
-                con valor manual.
-              </p>
+              {d.portfolio.contributed > 0 && (
+                <>
+                  <BreakdownRow label="Capital aportado (inversiones)" value={formatMoney(d.portfolio.contributed)} href="/inversiones" />
+                  <BreakdownRow label="Ganancia / pérdida" value={d.portfolio.totalGain === null ? "pendiente" : formatMoney(d.portfolio.totalGain)} href="/inversiones" />
+                </>
+              )}
             </>
           }
         >
-          <p className="text-xs text-muted">Aportado, ganancia y rentabilidad: <span className="text-warning">pendiente (fase 6)</span></p>
+          {d.portfolio.contributed > 0 ? (
+            <>
+              <p className="text-xs text-muted">
+                Aportado: <span className="font-medium text-ink">{formatMoney(d.portfolio.contributed, { decimals: 0 })}</span>
+              </p>
+              <p className="text-xs text-muted">
+                Ganancia: <Gain cents={d.portfolio.totalGain} pct={d.portfolio.simpleReturn} decimals={0} />
+              </p>
+            </>
+          ) : (
+            <p className="text-xs text-muted">
+              <Link href="/inversiones/nueva" className="text-info hover:underline">Registra tus inversiones</Link> para ver aportado y rentabilidad.
+            </p>
+          )}
+          {investedShare !== null && (
+            <p className="text-xs text-muted">
+              {formatPercent(investedShare)} de tu patrimonio neto
+            </p>
+          )}
         </Kpi>
 
         <Kpi

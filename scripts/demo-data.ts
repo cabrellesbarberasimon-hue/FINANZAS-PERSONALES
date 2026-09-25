@@ -7,9 +7,11 @@ import { cleanDescription, merchantKey } from "../src/domain/text";
  * Datos FICTICIOS para desarrollo. Solo se ejecuta contra data/demo.db
  * (scripts/demo.ts lo garantiza). Deterministas: misma semilla -> mismos datos.
  *
- * Fase 2: cuentas, movimientos (marzo-septiembre 2026), transferencias
- * internas vinculadas, saldos del banco (uno con descuadre a propósito para
- * probar la conciliación) y una deuda.
+ * Cuentas, movimientos (marzo-septiembre 2026), transferencias internas
+ * vinculadas, saldos del banco (uno con descuadre a propósito para probar la
+ * conciliación), una deuda e inversiones (fondo indexado con aportaciones
+ * mensuales vinculadas al broker, plan de pensiones y un ETF con valoración
+ * desactualizada a propósito).
  */
 
 // PRNG determinista (mulberry32)
@@ -36,6 +38,8 @@ interface DemoTx {
   extraordinary?: boolean;
   /** Clave para emparejar transferencias. */
   pair?: string;
+  /** Compra de fondo financiada por este cargo. */
+  buy?: { fund: "global"; price: string };
 }
 
 const OPENING = utcDate(2026, 2, 28);
@@ -71,6 +75,8 @@ export async function seedDemoData(db: PrismaClient): Promise<void> {
   };
 
   let prevCardSpend = 18000;
+  let nav = 104.2;
+  const navByMonth = new Map<string, number>();
   for (let i = 0; i < 7; i++) {
     const month = addMonths("2026-03", i);
     const [y, m] = month.split("-").map(Number) as [number, number];
@@ -115,6 +121,13 @@ export async function seedDemoData(db: PrismaClient): Promise<void> {
 
     // Aportación al broker
     transfer(principal, broker, d(26), 30000, "TRANSFERENCIA A BROKER DEMO", "INGRESO DESDE BANCO DEMO", `brk-${month}`);
+    // Con ese dinero, el broker compra participaciones del fondo indexado.
+    nav = Math.round(nav * (1 + (rand() * 0.07 - 0.03)) * 100) / 100;
+    navByMonth.set(month, nav);
+    add({
+      account: broker, date: d(27), amount: -30000, description: "SUSCRIPCION FONDO INDICE GLOBAL DEMO",
+      cat: ["Inversiones", "Aportación fondo"], kind: "INVESTMENT", buy: { fund: "global", price: nav.toFixed(2) },
+    });
   }
   // Extraordinarios
   add({ account: principal, date: utcDate(2026, 6, 30), amount: 31200, description: "DEVOLUCION AEAT IRPF 2025", cat: ["Ingresos", "Devolución"], kind: "INCOME", extraordinary: true });
@@ -171,6 +184,37 @@ export async function seedDemoData(db: PrismaClient): Promise<void> {
     await db.transaction.update({ where: { id: a }, data: { transferPeerId: b } });
     await db.transaction.update({ where: { id: b }, data: { transferPeerId: a } });
   }
+
+  // Inversiones (ficticias)
+  const fund = await db.investment.create({
+    data: { userId, name: "Fondo Índice Global (demo)", assetType: "INDEX_FUND", isin: "IE00B03HCZ61", platform: "Broker Demo", accountId: broker },
+  });
+  for (const t of txs) {
+    if (!t.buy) continue;
+    const units = (30000 / 100 / Number(t.buy.price)).toFixed(6);
+    await db.investmentTransaction.create({
+      data: { investmentId: fund.id, type: "BUY", date: t.date, amount: 30000, units, price: t.buy.price, cashTransactionId: idByIndex.get(t)! },
+    });
+  }
+  for (const [month, value] of navByMonth) {
+    const [y, m] = month.split("-").map(Number) as [number, number];
+    const end = utcDate(y, m + 1, 0);
+    if (end <= LAST_DAY) {
+      const drift = Math.round(value * (1 + (rand() * 0.02 - 0.005)) * 100) / 100;
+      await db.investmentPrice.create({ data: { investmentId: fund.id, date: end, price: drift.toFixed(2) } });
+    }
+  }
+  const plan = await db.investment.create({
+    data: { userId, name: "Plan de Pensiones (demo)", assetType: "PENSION_PLAN", platform: "Aseguradora Demo", valuationMode: "TOTAL_VALUE" },
+  });
+  await db.investmentTransaction.create({ data: { investmentId: plan.id, type: "BUY", date: utcDate(2025, 12, 20), amount: 150000 } });
+  await db.investmentPrice.create({ data: { investmentId: plan.id, date: utcDate(2026, 6, 30), totalValue: 158400 } });
+  await db.investmentPrice.create({ data: { investmentId: plan.id, date: utcDate(2026, 9, 1), totalValue: 161230 } });
+  const etf = await db.investment.create({
+    data: { userId, name: "ETF Emergentes (demo)", assetType: "ETF", ticker: "EMDEMO", platform: "Broker Demo", accountId: broker },
+  });
+  await db.investmentTransaction.create({ data: { investmentId: etf.id, type: "BUY", date: utcDate(2026, 2, 10), amount: 100000, units: "40", price: "25", fees: 200 } });
+  await db.investmentPrice.create({ data: { investmentId: etf.id, date: utcDate(2026, 6, 30), price: "26.40" } }); // desactualizado a propósito
 
   // Saldos del banco: el de julio cuadra; el de agosto tiene +150 € de descuadre a propósito.
   const balanceAt = async (accountId: string, at: Date, opening: number) => {

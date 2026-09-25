@@ -179,3 +179,10 @@ export function centsToInput(cents: Cents): string {
   const abs = Math.abs(cents);
   return `${cents < 0 ? "-" : ""}${Math.floor(abs / 100)},${String(abs % 100).padStart(2, "0")}`;
 }
+
+/** Número decimal (participaciones, VL) en formato español: "8,508216". */
+export function formatDecimal(value: { toString(): string } | string | null, maxDecimals = 6): string {
+  if (value === null) return "—";
+  const n = Number(value.toString());
+  return new Intl.NumberFormat("es-ES", { maximumFractionDigits: maxDecimals, useGrouping: "always" }).format(n);
+}

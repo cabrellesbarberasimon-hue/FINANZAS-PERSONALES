@@ -8,12 +8,13 @@ patrimonio, presupuestos y objetivos.
 corregir → automatización → simplicidad. Nunca se inventan datos: si falta
 información se muestra **"Pendiente de datos"**.
 
-> Estado: **Fases 1 a 5 completadas**: arquitectura, base de datos, cuentas
+> Estado: **Fases 1 a 6 completadas**: arquitectura, base de datos, cuentas
 > (saldos, conciliación, deudas), movimientos (filtros, alta manual, edición
 > con historial, transferencias internas), asistente inicial e importación de
 > extractos CSV/XLSX con anti-duplicados y conciliación, categorización
 > automática con reglas que aprenden de tus correcciones, detección de
-> transferencias internas, revisión de avisos y dashboard con cifras trazables. El diseño completo y el plan por fases están en
+> transferencias internas, revisión de avisos, dashboard con cifras trazables e
+> inversiones (aportaciones, valor liquidativo, ganancia, rentabilidad y TIR). El diseño completo y el plan por fases están en
 > [`docs/ARQUITECTURA.md`](docs/ARQUITECTURA.md).
 
 ---
@@ -112,6 +113,23 @@ cualquier mes pasado con las flechas.
 - Si falta un dato (una cuenta sin saldo a esa fecha, una deuda sin saldo, otra
   moneda) la cifra se marca **incompleta** y se indica qué falta; las
   variaciones pasan a «Pendiente de datos».
+
+## Inversiones
+
+1. **Inversiones › + Inversión**: nombre, tipo (fondo indexado, ETF, plan…), ISIN
+   (se valida), plataforma y cómo se valora (participaciones × valor liquidativo,
+   o valor total para PIAS/planes).
+2. **Operaciones**: cada aportación con su fecha, importe y participaciones o
+   valor liquidativo. Si ya tenías el fondo, registra también las pasadas.
+   Puedes vincular cada aportación a su cargo en el banco: deja de contar como
+   gasto y queda la traza.
+3. **Valor liquidativo**: añádelo cuando quieras (una vez al mes basta). Se
+   guarda el histórico; nunca se sobrescribe.
+
+La app muestra por separado **capital aportado** y **ganancia** (valor + retirado
+− aportado), rentabilidad simple y TIR (ponderada por fechas e importes), la
+evolución mensual valor vs. aportado, y la distribución por tipo, fondo y
+plataforma. Sin valor liquidativo, el valor aparece como «Pendiente de datos».
 
 ## Uso (cuentas y movimientos)
 
@@ -216,6 +234,10 @@ npm test
 - `tests/domain/networth.test.ts` y `tests/db/dashboard.test.ts`: patrimonio
   (activos − pasivos, tarjetas como deuda, datos pendientes), patrimonio a una
   fecha pasada, variaciones mensual y anual, KPIs de ahorro.
+- `tests/domain/investments.test.ts` y `tests/db/investments.test.ts`: aportaciones,
+  participaciones, precio medio, ganancia sin confundir aportación con
+  rentabilidad, ventas a coste medio, TIR, ISIN, histórico de VL, vínculo con el
+  banco y patrimonio con inversiones.
 - `tests/db/categorization.test.ts`: reglas (vista previa, aplicar, nunca tocar
   lo manual, editar/borrar y recalcular), aprendizaje (sugerir tras 3
   correcciones, aceptar, descartar), categorías, transferencias automáticas al
